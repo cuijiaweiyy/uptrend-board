@@ -1190,6 +1190,74 @@
     });
   }
 
+  /* 东财行情直连（与主看板实时行情同源 push2.eastmoney.com，浏览器已验证可达 + CORS） */
+  function emSecid(code) {
+    var pre = (code.charAt(0) === '6') ? '1' : '0';
+    return pre + '.' + code;
+  }
+  function emKlineDirect(code, period, days) {
+    var secid = emSecid(code);
+    var klt = (period === 'week') ? 102 : (period === 'month') ? 103 : 101;
+    var url = 'https://push2.eastmoney.com/api/qt/stock/kline/get?secid=' + secid +
+              '&fields1=f1,f2,f3&fields2=f51,f52,f53,f54,f55,f56,f57' +
+              '&klt=' + klt + '&fqt=1&end=20500101&lmt=' + days + '&_=' + Date.now();
+    return fetchTxJson(url).then(function (j) {
+      var dd = (j && j.data) || {};
+      var kl = dd.klines || [];
+      if (!kl.length) throw new Error('无数据');
+      var dates = [], ohlc = [], vols = [];
+      for (var i = 0; i < kl.length; i++) {
+        var p = String(kl[i]).split(',');
+        dates.push(p[0]);
+        ohlc.push([Number(p[1]), Number(p[2]), Number(p[4]), Number(p[3])]); // 开,收,高,低
+        vols.push(Number(p[5]));
+      }
+      return {
+        ok: true,
+        data: {
+          code: code, name: dd.name || code, period: period, days: days,
+          dates: dates, ohlc: ohlc, volumes: vols,
+          ma: { ma5: calcMA(ohlc, 5), ma10: calcMA(ohlc, 10),
+                ma20: calcMA(ohlc, 20), ma30: calcMA(ohlc, 30) }
+        }
+      };
+    });
+  }
+  function emMinuteDirect(code) {
+    var secid = emSecid(code);
+    var url = 'https://push2.eastmoney.com/api/qt/stock/trends2/get?secid=' + secid +
+              '&fields1=f1,f2,f3,f7&fields2=f51,f52,f53,f54,f55,f56,f57,f58' +
+              '&iscr=0&ndays=1&forcect=1&_=' + Date.now();
+    return fetchTxJson(url).then(function (j) {
+      var dd = (j && j.data) || {};
+      var tr = dd.trends || [];
+      if (!tr.length) throw new Error('无分时数据');
+      var prices = [], times = [], vols = [], cumAmt = [], cumVol = [], running = 0;
+      var prev = Number(dd.preClose) || null;
+      for (var i = 0; i < tr.length; i++) {
+        var p = String(tr[i]).split(',');
+        times.push(String(p[0]).slice(11));           // "2026-09-09 09:30" -> "09:30"
+        prices.push(Number(p[2]));                    // 分时走势取每分钟收盘价
+        var cv = Number(p[5]) || 0;                   // 累计成交量(手)
+        vols.push(i === 0 ? cv : cv - running);
+        running = cv;
+        cumVol.push(cv);
+        cumAmt.push(Number(p[6]) || 0);
+      }
+      var avg = cumVol.map(function (cv, i) {
+        return cv > 0 ? +(cumAmt[i] / (cv * 100)).toFixed(3) : prices[i];
+      });
+      return {
+        ok: true,
+        data: {
+          code: code, name: dd.name || code, period: 'minute', days: 1,
+          date: dd.date || '', times: times, prices: prices,
+          vols: vols, avg: avg, prev_close: prev
+        }
+      };
+    });
+  }
+
   function loadKline() {
     if (!state.code) return;
     setLoading('行情加载中…');
@@ -1211,12 +1279,31 @@
       if (isMin) { renderMinute(j.data); hide('kWaveWrap'); hideClickInfo(); }
       else { renderKline(j.data); renderSubHdrs(j.data); renderWaveRadar(j.data); }
     }
-    /* 纯静态站无后端 /kline，全部直连腾讯行情源（已开启 CORS） */
-    var loader = isMin ? txMinuteDirect(state.code)
-                       : txKlineDirect(state.code, period, days);
-    loader.then(handle).catch(function (e) {
-      setLoading('K线加载失败：' + ((e && e.message) || e) + '（行情源：腾讯）', true);
-    });
+    /* 多源兜底：主源东财（与主看板实时行情同源，浏览器已验证可达），兜底腾讯。
+       任一成功即渲染；全部失败才提示，文案注明已尝试的源，便于定位。 */
+    function tryLoad(sources, tried) {
+      tried = tried || [];
+      if (!sources.length) {
+        setLoading('K线加载失败：腾讯/东财行情源均不可用', true);
+        return;
+      }
+      var src = sources[0];
+      src().then(handle).catch(function (e) {
+        tried.push(src._name || '?');
+        if (sources.length > 1) {
+          setLoading('切换行情源…（' + tried.join('/') + ' 失败）');
+          setTimeout(function () { tryLoad(sources.slice(1), tried); }, 200);
+        } else {
+          setLoading('K线加载失败：' + ((e && e.message) || e) +
+                     '（已尝试：' + tried.join('/') + '）', true);
+        }
+      });
+    }
+    var sources = isMin
+      ? [function(){ return emMinuteDirect(state.code); }, function(){ return txMinuteDirect(state.code); }]
+      : [function(){ return emKlineDirect(state.code, period, days); }, function(){ return txKlineDirect(state.code, period, days); }];
+    sources[0]._name = '东财'; sources[1]._name = '腾讯';
+    tryLoad(sources);
   }
 
   /* ============ 日 K（含成交量 + 成交额） ============ */
