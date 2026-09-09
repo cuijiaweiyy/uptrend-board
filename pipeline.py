@@ -93,6 +93,10 @@ def main():
 
     # ---- 4) 发布：只有全部成功才覆盖 ----
     shutil.copyfile(BOARD, PUBLISH)
+    # 外链模式下图表库在同目录，需一并发布（缺了图表会空白）
+    ec = os.path.join(OUT_DIR, "echarts.min.js")
+    if os.path.exists(ec):
+        shutil.copyfile(ec, os.path.join(DOCS_DIR, "echarts.min.js"))
     log("\n发布成功 -> %s (%.0f KB)" % (PUBLISH, size_kb))
     log("数据交易日: %s" % date_str)
     return 0

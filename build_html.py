@@ -7,6 +7,7 @@ import datetime as dt
 import glob
 import json
 import os
+import shutil
 import subprocess
 import sys
 import urllib.request
@@ -22,9 +23,7 @@ TPL = """<!DOCTYPE html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>上升途中 · 板块统计看板 __DATE__</title>
-<script>
 __ECHARTS_LIB__
-</script>
 <style>
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   html { -webkit-text-size-adjust: 100%; }
@@ -284,9 +283,11 @@ __ECHARTS_LIB__
 </div>
 
 __KLINE_MODAL__
+__ECHARTS_BOOT__
 
 <script>
 var DATA = __DATA__;
+__DATA_UNPACK__
 var state = { board: 'industry_l1', sortBy: 'hit', exst: false, open: {} };
 var chart = null;
 
@@ -1000,25 +1001,139 @@ def load_kline_modal():
         return "<!-- K-line modal load failed: " + str(e) + " -->"
 
 
-def load_echarts_lib():
-    """优先读取本地 echarts.min.js 内联（output/ 或 应用根目录）；不存在则回退 CDN。
-
-    注意：云端「发布为应用」会排除 output/ 目录，故把 echarts.min.js 放在应用根目录
-    也能被内联，保证部署后图表不依赖外网 CDN。
-    """
-    candidates = [ECHARTS_JS_PATH, os.path.join(HERE, "echarts.min.js")]
-    for p in candidates:
+def _echarts_file():
+    """返回本地 echarts.min.js 路径（output/ 或 应用根目录），不存在返回 None。"""
+    for p in (ECHARTS_JS_PATH, os.path.join(HERE, "echarts.min.js")):
         if os.path.exists(p):
-            with open(p, encoding="utf-8") as f:
-                return "// ECharts 本地内联 (" + os.path.basename(os.path.dirname(p)) + "/echarts.min.js)\n" + f.read()
+            return p
+    return None
+
+
+def _inline_echarts():
+    """是否把 echarts 内联进 HTML。
+
+    默认外链（首屏快、可缓存）。设置环境变量 INLINE_ECHARTS=1 时内联，
+    用于生成可单独双击打开、不依赖同目录文件的离线单文件版。
+    """
+    return os.environ.get("INLINE_ECHARTS", "").strip() in ("1", "true", "yes")
+
+
+def load_echarts_lib():
+    """head 区域内容。
+
+    默认：仅输出 preload 提示，真正的加载放到 body 末尾（见 load_echarts_boot），
+    避免 1MB 的 echarts 阻塞首屏渲染（iOS Safari 上表现为长时间白屏/转圈）。
+    """
+    p = _echarts_file()
+    if p and not _inline_echarts():
+        return '<link rel="preload" as="script" href="echarts.min.js">'
+    if p:
+        with open(p, encoding="utf-8") as f:
+            return ("<script>// ECharts 本地内联（离线单文件版）\n"
+                    + f.read() + "\n</script>")
+    # 无本地文件：回退 CDN（动态注入，顺序可控）
     cdn = "https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js"
-    return (f"// 本地 ECharts 不存在，已回退 CDN\n"
-            f"(function(){{var s=document.createElement('script');"
+    return ("<script>(function(){var s=document.createElement('script');"
             f"s.src='{cdn}';s.async=false;"
-            f"s.onerror=function(){{var el=document.getElementById('chart-status');"
-            f"if(el){{el.classList.remove('hidden');el.classList.add('empty');"
-            f"el.textContent='ECharts 加载失败（CDN 不通 + 本地无 echarts.min.js）。请将 echarts.min.js 放到 output/ 目录。';}}}};"
-            f"document.head.appendChild(s);}})();")
+            "s.onerror=function(){var el=document.getElementById('chart-status');"
+            "if(el){el.classList.remove('hidden');el.classList.add('empty');"
+            "el.textContent='ECharts 加载失败（CDN 不通 + 本地无 echarts.min.js）。"
+            "请将 echarts.min.js 放到 output/ 目录。';}};"
+            "document.head.appendChild(s);})();</script>")
+
+
+# 数据解包：把 pack_data 字典化后的索引还原成字符串，放在 var DATA 之后立即执行。
+# 这样下游所有渲染代码看到的仍是原始的 concepts/industry 结构，无需任何改动。
+UNPACK_JS = """
+/* 数据字典还原：concepts/industry 在生成时已编码为索引，这里解回字符串 */
+(function () {
+  var cd = DATA.__cd || [], id = DATA.__id || [];
+  if (!cd.length && !id.length) { return; }
+  function fix(s) {
+    if (!s || typeof s !== 'object') { return; }
+    if (s.c && cd.length) {
+      s.concepts = s.c.map(function (i) { return cd[i]; });
+      delete s.c;
+    }
+    if (typeof s.i === 'number' && id.length) {
+      s.industry = id[s.i];
+      delete s.i;
+    }
+  }
+  var ks = ['industry_l1', 'industry_l2', 'industry_l3', 'concept'];
+  for (var a = 0; a < ks.length; a++) {
+    var arr = (DATA.boards || {})[ks[a]] || [];
+    for (var b = 0; b < arr.length; b++) {
+      var sts = arr[b].stocks || [];
+      for (var c = 0; c < sts.length; c++) { fix(sts[c]); }
+    }
+  }
+  var d = DATA.diff || {};
+  ['new', 'gone'].forEach(function (k) { (d[k] || []).forEach(fix); });
+  if (Array.isArray(DATA.pool)) { DATA.pool.forEach(fix); }
+})();
+"""
+
+
+def pack_data(data):
+    """字典化压缩 DATA（不改语义，前端 UNPACK_JS 还原）。
+
+    背景：同一批股票在 300+ 个概念板块里被重复携带，concepts/industry 字符串
+    反复出现，是页面体积的主要来源。编码为索引后可显著缩小；同时去掉前端已
+    不再展示的 is_st 字段。
+    """
+    cdict, clist = {}, []
+    idict, ilist = {}, []
+
+    def enc(st):
+        if not isinstance(st, dict):
+            return
+        cs = st.get("concepts") or []
+        if cs:
+            idxs = []
+            for c in cs:
+                if c not in cdict:
+                    cdict[c] = len(clist)
+                    clist.append(c)
+                idxs.append(cdict[c])
+            st["c"] = idxs
+            del st["concepts"]
+        ind = st.get("industry")
+        if ind:
+            if ind not in idict:
+                idict[ind] = len(ilist)
+                ilist.append(ind)
+            st["i"] = idict[ind]
+            del st["industry"]
+        st.pop("is_st", None)
+
+    boards = data.get("boards") or {}
+    for key in ("industry_l1", "industry_l2", "industry_l3", "concept"):
+        for b in (boards.get(key) or []):
+            for st in (b.get("stocks") or []):
+                enc(st)
+    diff = data.get("diff") or {}
+    for key in ("new", "gone"):
+        for st in (diff.get(key) or []):
+            enc(st)
+    pool = data.get("pool")
+    if isinstance(pool, list):
+        for st in pool:
+            enc(st)
+    if clist:
+        data["__cd"] = clist
+    if ilist:
+        data["__id"] = ilist
+    return data
+
+
+def load_echarts_boot():
+    """body 末尾内容：真正加载 echarts，且在业务脚本之前，保证调用时序。"""
+    p = _echarts_file()
+    if p and not _inline_echarts():
+        # 同步外链：浏览器可缓存，二次访问不再重复下载 1MB
+        return '<script src="echarts.min.js"></script>'
+    return ""
 
 
 def enrich_amounts(data, date_str):
@@ -1097,7 +1212,8 @@ def main(date_str=None):
         data = json.load(f)
     enrich_amounts(data, date_str)
 
-    data_json = json.dumps(data, ensure_ascii=False).replace("</", "<\\/")
+    data = pack_data(data)
+    data_json = json.dumps(data, ensure_ascii=False, separators=(",", ":")).replace("</", "<\\/")
     html = (TPL
             .replace("__DATA__", data_json)
             .replace("__DATE__", date_str)
@@ -1106,7 +1222,9 @@ def main(date_str=None):
             .replace("__SOURCE__", data.get("source", "同花顺问财"))
             .replace("__QUERY__", data.get("query", ""))
             .replace("__DISCLAIMER__", DISCLAIMER)
+            .replace("__DATA_UNPACK__", UNPACK_JS)
             .replace("__ECHARTS_LIB__", load_echarts_lib())
+            .replace("__ECHARTS_BOOT__", load_echarts_boot())
             .replace("__KLINE_MODAL__", load_kline_modal()))
 
     ok, msg = js_check(html)
@@ -1116,9 +1234,15 @@ def main(date_str=None):
 
     os.makedirs(OUT_DIR, exist_ok=True)
     out = os.path.join(OUT_DIR, "uptrend_board.html")  # 固定文件名，避免日期命名歧义
+    # 外链模式下把 echarts.min.js 拷到同目录，保证 index.html 能加载图表库
+    src = _echarts_file()
+    if src and not _inline_echarts():
+        dst = os.path.join(OUT_DIR, "echarts.min.js")
+        if os.path.abspath(src) != os.path.abspath(dst):
+            shutil.copyfile(src, dst)
     with open(out, "w", encoding="utf-8") as f:
         f.write(html)
-    print(f"看板生成 -> {out}  ({len(html)/1024:.0f} KB)")
+    print(f"看板生成 -> {out}  ({len(html.encode('utf-8'))/1024:.0f} KB)")
     return out
 
 
