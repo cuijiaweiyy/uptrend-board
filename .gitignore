@@ -1,0 +1,19 @@
+# 生成产物（发布内容在 docs/ 目录）
+output/
+_js_check.js
+_board_check.html
+_check.js
+.sched_lock
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# 编辑器 / 系统
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
