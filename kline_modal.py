@@ -879,7 +879,9 @@ KLINE_MODAL_HTML = r"""<style>
           data: {
             code: code, name: txName(code), period: period, days: days,
             dates: dates, ohlc: ohlc, volumes: vols,
-            ma: { 5: calcMA(ohlc, 5), 10: calcMA(ohlc, 10), 20: calcMA(ohlc, 20), 60: calcMA(ohlc, 60) }
+            /* renderKline 读取 d.ma.ma5/ma10/ma20/ma30，键名必须匹配 */
+            ma: { ma5: calcMA(ohlc, 5), ma10: calcMA(ohlc, 10),
+                  ma20: calcMA(ohlc, 20), ma30: calcMA(ohlc, 30) }
           }
         };
       });
