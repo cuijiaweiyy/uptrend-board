@@ -98,7 +98,9 @@
   .diffcard .drate.down { color:#16a34a; }
   .diffcard .drate.flat { color:#9ca3af; }
   .diffcard .damt { font-size:11.5px; color:#6b7280; min-width:58px; text-align:right; font-variant-numeric:tabular-nums; }
-  .diffcard .drank { font-size:10px; color:#cbd5e1; min-width:18px; text-align:right; }
+  /* 序号：定宽右对齐，避免位数不同（1位/3位）导致名称起始位置参差 */
+  .diffcard .drank { flex:0 0 auto; width:20px; min-width:20px; font-size:10px;
+                    color:#b0b8c4; text-align:right; font-variant-numeric:tabular-nums; }
   .up { color:#c0392b; } .down { color:#16a34a; }
   .det td { background:#fafbfc; padding:4px 6px 8px 6px; color:#4b5563; font-size:12px; }
   .det .chip { display:inline-block; border:1px solid #e5e7eb; border-radius:5px;
@@ -152,7 +154,8 @@
     .diffcard .dconcepts .chip { font-size:10px; padding:0; }
     .diffcard .drate { font-size:11.5px; min-width:50px; }
     .diffcard .damt { font-size:10.5px; min-width:48px; }
-    .diffcard .drank { display:none; }
+    /* 移动端也保留序号，但压到最窄，尽量不占名称空间 */
+    .diffcard .drank { width:15px; min-width:15px; font-size:9px; color:#b8c0cb; }
   #diffTable thead th { position: sticky; top: -1px; background: #fff; z-index: 2; box-shadow: 0 1px 0 #e5e7eb; }
     #chart-wrap.tight #chart, #chart { min-height: 140px; }
   }
