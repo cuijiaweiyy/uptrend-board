@@ -559,7 +559,7 @@ KLINE_MODAL_HTML = r"""<style>
     $('klineMask').classList.add('open');
     document.body.style.overflow = 'hidden';
     setNews(state.code);
-    if (!state.marks.length) {
+    if (window.__HAS_BACKEND__ && !state.marks.length) {
       fetchJson('/chart_marks', 2).then(function(j){
         state.marks = (j && j.ok && j.marks) || [];
       }).catch(function(){});
@@ -862,7 +862,7 @@ KLINE_MODAL_HTML = r"""<style>
     var sym = txSym(code);
     var url = 'https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=' +
               sym + ',' + period + ',,,' + days + ',qfq';
-    return fetch(url, { cache: 'no-store' }).then(function (r) { return r.json(); })
+    return fetchTxJson(url)
       .then(function (j) {
         var node = (j && j.data && j.data[sym]) || {};
         var rows = node['qfq' + period] || node[period] || [];
@@ -885,9 +885,71 @@ KLINE_MODAL_HTML = r"""<style>
       });
   }
 
+  /* 腾讯行情直连：带一次重试，吸收瞬时波动 */
+  function fetchTxJson(url) {
+    return new Promise(function (resolve, reject) {
+      function go(n) {
+        fetch(url, { cache: 'no-store' })
+          .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+          .then(resolve)
+          .catch(function (e) {
+            if (n < 2) { setLoading('行情重试中…'); setTimeout(function () { go(n + 1); }, 900); }
+            else reject(e);
+          });
+      }
+      go(1);
+    });
+  }
+
+  /* 分时直连腾讯：价格/均价/量取自分钟线，昨收取自日K前一日收盘 */
+  function txMinuteDirect(code) {
+    var sym = txSym(code);
+    var mUrl = 'https://web.ifzq.gtimg.cn/appstock/app/minute/query?code=' + sym;
+    var dUrl = 'https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=' + sym + ',day,,,3,qfq';
+    return Promise.all([
+      fetchTxJson(mUrl),
+      fetchTxJson(dUrl).catch(function () { return null; })
+    ]).then(function (res) {
+      var mj = res[0], dj = res[1];
+      var node = (mj && mj.data && mj.data[sym]) || {};
+      var md = node.data || {};
+      var pts = md.data || [];
+      if (!pts.length) throw new Error('无分时数据');
+      var prices = [], times = [], vols = [], cumAmt = [], cumVol = [], running = 0;
+      for (var i = 0; i < pts.length; i++) {
+        var pr = String(pts[i]).split(' ');          // 腾讯分时每点为空格分隔字符串
+        prices.push(Number(pr[1]));
+        times.push(pr[0]);
+        var cv = Number(pr[2]) || 0;                 // 累计成交量(手)
+        vols.push(i === 0 ? cv : cv - running);     // 还原为每分钟成交量
+        running = cv;
+        cumVol.push(cv);
+        cumAmt.push(Number(pr[3]) || 0);             // 累计成交额(元)
+      }
+      var avg = cumVol.map(function (cv, i) {
+        return cv > 0 ? +(cumAmt[i] / (cv * 100)).toFixed(3) : prices[i];
+      });
+      var prev = null;
+      if (dj) {
+        var dnode = (dj.data && dj.data[sym]) || {};
+        var drows = dnode.qfqday || dnode.day || [];
+        if (drows.length >= 2) prev = Number(drows[drows.length - 2][2]);   // 昨收
+        else if (drows.length === 1) prev = Number(drows[0][2]);
+      }
+      return {
+        ok: true,
+        data: {
+          code: code, name: txName(code), period: 'minute', days: 1,
+          date: md.date || '', times: times, prices: prices,
+          vols: vols, avg: avg, prev_close: prev
+        }
+      };
+    });
+  }
+
   function loadKline() {
     if (!state.code) return;
-    setLoading('加载中…');
+    setLoading('行情加载中…');
     var isMin = state.mode === 'minute';
     var isM5  = state.mode === 'm5';
     var isMore = state.mode === 'more';
@@ -899,7 +961,6 @@ KLINE_MODAL_HTML = r"""<style>
     else if (state.mode === 'month') { period = 'month'; days = 60;  }
     else                              { period = 'day';   days = 70;  }
 
-    var url = '/kline?code=' + state.code + '&period=' + period + '&days=' + days;
     function handle(j) {
       if (!j || !j.ok) { setLoading((j && j.msg) || '加载失败', true); return; }
       renderHeader(j.data);
@@ -907,15 +968,12 @@ KLINE_MODAL_HTML = r"""<style>
       if (isMin) { renderMinute(j.data); hide('kWaveWrap'); hideClickInfo(); }
       else { renderKline(j.data); renderSubHdrs(j.data); renderWaveRadar(j.data); }
     }
-    fetchJson(url, 3, function(n){ setLoading('网络抖动，第 ' + (n + 1) + ' 次重试…'); })
-      .then(handle)
-      .catch(function(){
-        if (isMin) { setLoading('分时数据需要后端支持', true); return; }
-        setLoading('切换直连行情…');
-        txKlineDirect(state.code, period, days)
-          .then(handle)
-          .catch(function(e){ setLoading('加载失败：' + e.message, true); });
-      });
+    /* 纯静态站无后端 /kline，全部直连腾讯行情源（已开启 CORS） */
+    var loader = isMin ? txMinuteDirect(state.code)
+                       : txKlineDirect(state.code, period, days);
+    loader.then(handle).catch(function (e) {
+      setLoading('K线加载失败：' + ((e && e.message) || e) + '（行情源：腾讯）', true);
+    });
   }
 
   /* ============ 日 K（含成交量 + 成交额） ============ */
