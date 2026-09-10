@@ -489,5 +489,21 @@
   "concept||两轮车": 79,
   "concept||碳纤维": 82,
   "concept||成飞概念": 43,
-  "concept||军工信息化": 114
+  "concept||军工信息化": 114,
+  "industry_l2||证券": 50,
+  "industry_l2||汽车整车": 23,
+  "industry_l2||轨交设备": 30,
+  "industry_l3||农商行": 10,
+  "industry_l3||股份制银行": 9,
+  "industry_l3||航海装备": 10,
+  "industry_l3||其他通信设备": 13,
+  "industry_l3||铜": 16,
+  "industry_l3||面板": 41,
+  "industry_l3||数字媒体": 16,
+  "concept||国产操作系统": 67,
+  "concept||HJT电池": 69,
+  "concept||云办公": 49,
+  "concept||ERP概念": 35,
+  "concept||BC电池": 52,
+  "concept||华为海思概念股": 52
 }
