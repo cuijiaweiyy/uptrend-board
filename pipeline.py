@@ -93,6 +93,23 @@ def main():
 
     # ---- 4) 发布：只有全部成功才覆盖 ----
     shutil.copyfile(BOARD, PUBLISH)
+
+    # 同时产出 board.json：前端实时代码块读它做「打开即最新」。
+    # 这样即使 Worker 的 cron 没跑（新账号未激活），现有的 Actions 定时任务
+    # 也能让实时数据源保持更新，不至于永远停在某个快照上。
+    try:
+        import json
+        stats_path = os.path.join(DATA_DIR, "stats_%s.json" % date_str)
+        if os.path.exists(stats_path):
+            with open(stats_path, "r", encoding="utf-8") as f:
+                stats = json.load(f)
+            with open(os.path.join(DOCS_DIR, "board.json"), "w", encoding="utf-8") as f:
+                json.dump(stats, f, ensure_ascii=False, separators=(",", ":"))
+            log("board.json 已更新 -> docs/board.json (%.0f KB)"
+                % (os.path.getsize(os.path.join(DOCS_DIR, "board.json")) / 1024.0))
+    except Exception as e:  # noqa: BLE001
+        log("[warn] board.json 生成失败（不影响主看板）：%s" % e)
+
     # 外链模式下图表库在同目录，需一并发布（缺了图表会空白）
     ec = os.path.join(OUT_DIR, "echarts.min.js")
     if os.path.exists(ec):

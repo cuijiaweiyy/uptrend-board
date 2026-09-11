@@ -140,7 +140,7 @@ async function wencaiQuery(question, token, retry = 2) {
 //   450ms(~2.2 req/s) -> 发到第 10 个左右就被问财封（Nginx forbidden），且封禁持续 ~2 分钟
 //   1800ms(~0.55 req/s) -> 连续 17 次全部成功
 // 因此默认取 1600ms 保守值，可用 env.MIN_GAP 调整。
-const DEFAULT_MIN_GAP = 1600;
+const DEFAULT_MIN_GAP = 450; // 2.2 req/s：Python 侧 pipeline 实测长期安全的速率
 
 async function mapLimit(items, limit, worker, minGap = DEFAULT_MIN_GAP) {
   const out = new Array(items.length);
@@ -221,16 +221,20 @@ function normRow(r) {
 // 问财单次上限 100 条且 page 分页无效、sort 双向排序实测也无效，
 // 因此按「一级行业」分段：各行业命中数远低于 100，且互不重叠，并集即全量。
 
-async function fetchPool(token, maxPasses = 3, minGap = DEFAULT_MIN_GAP) {
+async function fetchPool(token, maxPasses = 3, minGap = DEFAULT_MIN_GAP, deadline = 0) {
   let todo = [...INDUSTRY_L1];
   const collected = new Map();
   let tradeDate = '';
   let failed = [];
 
   for (let pass = 0; pass < maxPasses && todo.length; pass++) {
+    // 墙钟预算：Workers 免费版 cron 有 30s 上限，必须赶在 deadline 前收尾
+    if (deadline && Date.now() > deadline) break;
     if (pass > 0) {
       // 上一轮有失败，先退避一段时间再补抓，避开问财风控窗口
-      await new Promise((res) => setTimeout(res, 8000 * pass));
+      const wait = 8000 * pass;
+      if (deadline && Date.now() + wait > deadline) break; // 退避完就没时间了，交给下一轮 cron
+      await new Promise((res) => setTimeout(res, wait));
     }
     const results = await mapLimit(
       todo,
@@ -456,11 +460,11 @@ function todayStr() {
   return `${d.getUTCFullYear()}${p(d.getUTCMonth() + 1)}${p(d.getUTCDate())}`;
 }
 
-async function buildBoard(env) {
+async function buildBoard(env, deadline = 0) {
   const token = getHexinV();
   const minGap = Number(env.MIN_GAP || DEFAULT_MIN_GAP);
   const [poolRes, totals] = await Promise.all([
-    fetchPool(token, 3, minGap),
+    fetchPool(token, 3, minGap, deadline),
     loadTotals(env),
   ]);
   const { stocks, tradeDate, failed } = poolRes;
@@ -500,6 +504,86 @@ async function buildBoard(env) {
     diff,
     _diag: { failed_industries: failed },
   };
+}
+
+// ---------- 回写 GitHub Pages ----------
+// 走 Git Data API（blob -> tree -> commit -> ref），因为 board.json 有 1.5MB，
+// contents API 对大文件不稳定；Git Data API 能稳吃这个体量。
+
+function b64encodeUtf8(str) {
+  const bytes = new TextEncoder().encode(str);
+  let bin = '';
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    bin += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+  }
+  return btoa(bin);
+}
+
+async function ghApi(env, method, path, body) {
+  const headers = {
+    Authorization: 'token ' + env.GH_TOKEN,
+    Accept: 'application/vnd.github+json',
+    'User-Agent': 'uptrend-worker',
+    'Content-Type': 'application/json',
+  };
+  const r = await fetch('https://api.github.com' + path, {
+    method,
+    headers,
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  const txt = await r.text();
+  let j = null;
+  try { j = JSON.parse(txt); } catch (e) { /* 非 JSON */ }
+  if (!r.ok) throw new Error(method + ' ' + path + ' -> ' + r.status + ' ' + txt.slice(0, 200));
+  return j;
+}
+
+async function pushBoardToGithub(env, data) {
+  const token = env.GH_TOKEN;
+  if (!token) return { skipped: 'no GH_TOKEN' };
+  const repo = env.GH_REPO || 'cuijiaweiyy/uptrend-board';
+  const path = (env.GH_PATH || 'docs/board.json').replace(/^\/+/, '');
+  const branch = env.GH_BRANCH || 'main';
+
+  const content = JSON.stringify(data);
+
+  // 1) 先看远端当前 blob sha，内容没变就不提交（避免每 15 分钟制造一个空 commit）
+  try {
+    const cur = await ghApi(env, 'GET', `/repos/${repo}/contents/${path}?ref=${branch}`);
+    const blob = await ghApi(env, 'POST', `/repos/${repo}/git/blobs`, {
+      content: b64encodeUtf8(content),
+      encoding: 'base64',
+    });
+    if (cur && cur.sha && cur.sha === blob.sha) return { skipped: 'unchanged' };
+  } catch (e) {
+    // 文件还不存在（首次）或查询失败都继续往下走
+  }
+
+  const ref = await ghApi(env, 'GET', `/repos/${repo}/git/ref/heads/${branch}`);
+  const baseSha = ref.object.sha;
+  const commit = await ghApi(env, 'GET', `/repos/${repo}/git/commits/${baseSha}`);
+  const baseTree = commit.tree.sha;
+
+  const blob = await ghApi(env, 'POST', `/repos/${repo}/git/blobs`, {
+    content: b64encodeUtf8(content),
+    encoding: 'base64',
+  });
+  const tree = await ghApi(env, 'POST', `/repos/${repo}/git/trees`, {
+    base_tree: baseTree,
+    tree: [{ path, mode: '100644', type: 'blob', sha: blob.sha }],
+  });
+  const msg = `data: ${data.date || ''} 实时看板 ${data.pool ? data.pool.total : '?'} 只`;
+  const newCommit = await ghApi(env, 'POST', `/repos/${repo}/git/commits`, {
+    message: msg,
+    tree: tree.sha,
+    parents: [baseSha],
+  });
+  await ghApi(env, 'PATCH', `/repos/${repo}/git/refs/heads/${branch}`, {
+    sha: newCommit.sha,
+    force: false,
+  });
+  return { ok: true, sha: newCommit.sha.slice(0, 10) };
 }
 
 export default {
@@ -581,16 +665,31 @@ export default {
     }
   },
 
-  // 定时预热：把完整结果提前算好写进 KV，让用户请求秒回（冷构建 ~50s 不能让用户等）
+  // 定时：算好 -> 写 KV -> 提交回 GitHub Pages
+  // 为什么必须回写 GitHub：workers.dev 在国内被 DNS 污染，手机直连不上；
+  // 而 github.io 可达。所以 Worker 只做计算，Pages 负责投递。
   async scheduled(event, env, ctx) {
+    // 诊断：每轮结果写进 KV。workers.dev 在国内被 DNS 污染、wrangler tail 也连不上，
+    // 只能靠 KV 的 REST 接口回读运行状态。
+    const diag = { ts: new Date().toISOString(), cron: event && event.cron };
     try {
-      const data = await buildBoard(env);
-      const complete =
-        !(data._diag && data._diag.failed_industries && data._diag.failed_industries.length);
+      const data = await buildBoard(env, Date.now() + Number(env.BUILD_BUDGET_MS || 22000));
+      diag.total = data.pool && data.pool.total;
+      const fl = data._diag && data._diag.failed_industries;
+      diag.failed = fl ? fl.length : 0;
+      diag.failedList = fl ? fl.slice(0, 40) : [];
+      const complete = !(fl && fl.length);
       if (complete) await writeBoardKv(env, data);
+      const pushed = await pushBoardToGithub(env, data);
+      diag.pushed = pushed;
     } catch (e) {
-      // cron 失败不重试：交给下一轮，避免叠加问财压力
-      console.error('scheduled build failed:', e && e.message ? e.message : e);
+      diag.error = String(e && e.message ? e.message : e);
+    } finally {
+      try {
+        if (env.UPTREND_KV) {
+          await env.UPTREND_KV.put('diag:last', JSON.stringify(diag));
+        }
+      } catch (_) { /* 诊断写失败不影响主流程 */ }
     }
   },
 };
