@@ -1,0 +1,20 @@
+name = "uptrend-board-api"
+main = "index.js"
+compatibility_date = "2026-09-10"
+
+# 问财限流很凶，缓存时长建议 >= 300 秒
+[vars]
+TOTALS_URL = "https://cuijiaweiyy.github.io/uptrend-board/totals.json"
+CACHE_TTL = 300
+
+# 定时预热（UTC 时间；北京时间 = UTC+8）
+#   01:00-07:59 UTC -> 北京 09:00-15:59（盘中）
+#   13:00-15:59 UTC -> 北京 21:00-23:59（盘后数据更新）
+# 冷构建要 ~50s，靠 cron 提前算好写进 KV，用户打开才能秒回。
+[triggers]
+crons = ["*/15 1-7,13-15 * * 1-5"]
+# 创建：npx wrangler kv:namespace create UPTREND_KV
+# 然后把返回的 id 填到这里并取消注释。未配置时该指标自动降级显示「—」，不影响主功能。
+# [[kv_namespaces]]
+# binding = "UPTREND_KV"
+# id = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
