@@ -1,0 +1,15 @@
+{
+  "name": "uptrend-board-api",
+  "version": "1.0.0",
+  "private": true,
+  "description": "上升途中看板实时数据后端：自带 hexin-v token 生成，实时抓取同花顺问财股票池并计算板块统计",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "tail": "wrangler tail"
+  },
+  "devDependencies": {
+    "wrangler": "^3.60.0"
+  }
+}
