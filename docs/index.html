@@ -2263,7 +2263,9 @@ renderConclusion();
   set('正在获取最新名单…', 'rgba(0,0,0,.55)');
   var slow = setTimeout(function(){ set('实时数据较慢，先显示快照', 'rgba(180,120,0,.9)'); }, 8000);
 
-  fetch(SRC, { cache: 'no-store' })
+  // 加时间戳击穿 GitHub Pages CDN 缓存：保证每次打开都取到 Worker 刚推的最新 board.json
+  var SRC_Q = SRC + (SRC.indexOf('?') >= 0 ? '&' : '?') + '_=' + Date.now();
+  fetch(SRC_Q, { cache: 'no-store' })
     .then(function(r){
       if (!r.ok) throw new Error('HTTP ' + r.status);
       return r.json();
