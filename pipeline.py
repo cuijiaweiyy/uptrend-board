@@ -9,6 +9,7 @@
   退出码 0 = 成功并已更新；非 0 = 失败但页面不受影响。
 """
 import datetime as dt
+import json
 import os
 import shutil
 import subprocess
@@ -22,6 +23,8 @@ BOARD = os.path.join(OUT_DIR, "uptrend_board.html")
 PUBLISH = os.path.join(DOCS_DIR, "index.html")
 
 PY = sys.executable
+
+from fetch_pool import STRATEGIES  # 双策略配置（上升途中 / 均线多头排列）
 
 
 def log(msg):
@@ -66,15 +69,16 @@ def main():
         return 3
     log("交易日: %s" % date_str)
 
-    # ---- 2) 统计 ----
-    try:
-        run("analyze.py", date_str, timeout=3600)
-    except Exception as e:  # noqa: BLE001
-        log("[FATAL] 统计失败：%s" % e)
-        log("[FATAL] 保留上一次看板，不覆盖发布内容。")
-        return 4
+    # ---- 2) 统计（逐策略）----
+    for strat in STRATEGIES:
+        try:
+            run("analyze.py", date_str, strat, timeout=3600)
+        except Exception as e:  # noqa: BLE001
+            log("[FATAL] 统计失败[%s]：%s" % (strat, e))
+            log("[FATAL] 保留上一次看板，不覆盖发布内容。")
+            return 4
 
-    # ---- 3) 生成看板 ----
+    # ---- 3) 生成看板（首屏嵌入「上升途中」单策略数据）----
     try:
         run("build_html.py", timeout=1200)
     except Exception as e:  # noqa: BLE001
@@ -94,19 +98,21 @@ def main():
     # ---- 4) 发布：只有全部成功才覆盖 ----
     shutil.copyfile(BOARD, PUBLISH)
 
-    # 同时产出 board.json：前端实时代码块读它做「打开即最新」。
-    # 这样即使 Worker 的 cron 没跑（新账号未激活），现有的 Actions 定时任务
-    # 也能让实时数据源保持更新，不至于永远停在某个快照上。
+    # 合并双策略 stats 为 board.json（前端运行时按策略切换读取）。
     try:
-        import json
-        stats_path = os.path.join(DATA_DIR, "stats_%s.json" % date_str)
-        if os.path.exists(stats_path):
-            with open(stats_path, "r", encoding="utf-8") as f:
-                stats = json.load(f)
+        combined = {"updated_at": dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "strategies": {}}
+        for strat in STRATEGIES:
+            sp = os.path.join(DATA_DIR, "stats_%s_%s.json" % (strat, date_str))
+            if os.path.exists(sp):
+                with open(sp, "r", encoding="utf-8") as f:
+                    combined["strategies"][strat] = json.load(f)
+        if combined["strategies"]:
             with open(os.path.join(DOCS_DIR, "board.json"), "w", encoding="utf-8") as f:
-                json.dump(stats, f, ensure_ascii=False, separators=(",", ":"))
-            log("board.json 已更新 -> docs/board.json (%.0f KB)"
+                json.dump(combined, f, ensure_ascii=False, separators=(",", ":"))
+            log("board.json 已更新（双策略）-> docs/board.json (%.0f KB)"
                 % (os.path.getsize(os.path.join(DOCS_DIR, "board.json")) / 1024.0))
+        else:
+            log("[warn] 无策略 stats，跳过 board.json 生成")
     except Exception as e:  # noqa: BLE001
         log("[warn] board.json 生成失败（不影响主看板）：%s" % e)
 

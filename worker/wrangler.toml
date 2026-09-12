@@ -1,19 +1,20 @@
 name = "uptrend-board-api"
 main = "index.js"
 compatibility_date = "2026-09-10"
+account_id = "c14295ae10a585f0c08e54870bd2d238"
 
 # 问财限流很凶，缓存时长建议 >= 300 秒
 [vars]
 TOTALS_URL = "https://cuijiaweiyy.github.io/uptrend-board/totals.json"
 CACHE_TTL = 300
 
-# 定时预热（UTC 时间；北京时间 = UTC+8）
-#   01:00-07:59 UTC -> 北京 09:00-15:59（盘中）
-#   13:00-15:59 UTC -> 北京 21:00-23:59（盘后数据更新）
-# 冷构建要 ~50s，靠 cron 提前算好写进 KV，用户打开才能秒回。
+# 兜底预热（UTC 时间；北京时间 = UTC+8）
+#   01:00-07:59 UTC -> 北京 09:00-15:59（仅交易时段，盘后数据由盘中最后一份覆盖）
+#   仅工作日 1-5。
+# 注意：主刷新已改为「页面打开即算」（Pages Function 触发），此 cron 仅为兜底——
+# 当 pages.dev 在用户网络不可达时，保证 GitHub board.json 最坏 15 分钟龄，不至于陈旧。
 [triggers]
-# 临时：UTC 16-18（北京 00:00-03:00）每 15 分钟跑一次，用于验证与首次灌数据
-crons = ["*/15 16-18 * * *"]
+crons = ["*/15 1-7 * * 1-5"]
 [[kv_namespaces]]
 binding = "UPTREND_KV"
 id = "a51fa85529a04774a8144e6dd5b57905"

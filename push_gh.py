@@ -67,7 +67,7 @@ def main(paths):
         return 1
     new_tree = req("POST", "/repos/%s/%s/git/trees" % (OWNER, REPO),
                    {"base_tree": base_tree, "tree": tree})
-    msg = sys.argv[0] and "perf: 拆分 echarts + 数据字典化，页面 2.9MB -> 0.85MB"
+    msg = "feat: 双策略(上升途中/均线多头排列) + 今日变动子tab(新进入/退出)；Worker 输出合并 board"
     new_commit = req("POST", "/repos/%s/%s/git/commits" % (OWNER, REPO),
                      {"message": msg, "tree": new_tree["sha"], "parents": [base_sha]})
     req("PATCH", "/repos/%s/%s/git/refs/heads/%s" % (OWNER, REPO, BRANCH),

@@ -9,17 +9,35 @@
 //   GET /api/health -> 自检（token 生成 + 单次问财连通性）
 import { createShims } from './dom-shim.js';
 import hexinCore from './hexinv-core.js';
-import { INDUSTRY_L1, NOISE_KEYWORDS, MARKET_MAP } from './constants.js';
+import { NOISE_KEYWORDS, MARKET_MAP } from './constants.js';
 
 const shims = createShims();
-const getHexinV = hexinCore(shims);
+export const getHexinV = hexinCore(shims);
 
 const WENCAI_URL =
   'https://www.iwencai.com/unifiedwap/unified-wap/v2/result/get-robot-data';
 const ADD_INFO =
   '{"urp":{"scene":1,"company":1,"business":1},"contentType":"json","searchInfo":true}';
-const BASE_COND = '上升途中';
-const EXTRA_FIELDS = '所属同花顺行业 所属概念';
+// 双策略配置：上升途中 / 均线多头排列。
+// 名单唯一来源 = 同花顺问财；其余字段（成交额等）随策略附带。
+const STRATEGIES = {
+  uptrend: {
+    key: 'uptrend',
+    label: '上升途中',
+    cond: '上升途中',
+    extra: '所属同花顺行业 所属概念',
+    source: '同花顺问财 iwencai（口径：上升途中 → 上升通道）',
+    query: '上升途中 所属同花顺行业 所属概念',
+  },
+  ma: {
+    key: 'ma',
+    label: '均线多头排列',
+    cond: '日均线多头排列 周均线多头排列 可交易',
+    extra: '所属同花顺行业 所属概念 成交额',
+    source: '同花顺问财 iwencai（口径：日均线多头排列 + 周均线多头排列 + 可交易）',
+    query: '日均线多头排列 周均线多头排列 可交易 所属同花顺行业 所属概念 成交额',
+  },
+};
 const CACHE_TTL = 300; // 5 分钟：问财限流很凶，必须缓存
 
 function corsHeaders() {
@@ -142,6 +160,9 @@ async function wencaiQuery(question, token, retry = 2) {
 // 因此默认取 1600ms 保守值，可用 env.MIN_GAP 调整。
 const DEFAULT_MIN_GAP = 450; // 2.2 req/s：Python 侧 pipeline 实测长期安全的速率
 
+// 抓取全量预算（cron 墙钟上限 30s，留足余量）
+const ACCUM_BUDGET_MS = 25000;
+
 async function mapLimit(items, limit, worker, minGap = DEFAULT_MIN_GAP) {
   const out = new Array(items.length);
   let cursor = 0;
@@ -214,56 +235,64 @@ function normRow(r) {
     buy_signal: pick('买入信号inter') ?? dyn('买入信号inter'),
     tech_pattern: pick('技术形态') ?? dyn('技术形态'),
     is_st: name.toUpperCase().includes('ST') || name.startsWith('*'),
+    amount: fnum(pick('成交额') ?? dyn('成交额')),
   };
 }
 
-// ---------- 抓取股票池 ----------
-// 问财单次上限 100 条且 page 分页无效、sort 双向排序实测也无效，
-// 因此按「一级行业」分段：各行业命中数远低于 100，且互不重叠，并集即全量。
+// ---------- 抓取股票池（全量）----------
+// 按交易所分段抓取「上升途中」全量池，而非按行业：
+//   问财对「上升途中 + 部分行业名(医药生物/汽车等)」的组合解析不稳定，恒返回 0（condition 为空）；
+//   而「上升途中 + 沪市/深市」稳定解析，且 沪(≈43)+深(≈61)=104 覆盖全量，每段 <100 不受 perpage 上限截断。
+//   行业分类交由问财在返回行里用「所属同花顺行业」字段给出，避免我们自己用申万名去套导致整段落空。
+const EXCHANGE_SEGS = [{ q: '沪市' }, { q: '深市' }];
 
-async function fetchPool(token, maxPasses = 3, minGap = DEFAULT_MIN_GAP, deadline = 0) {
-  let todo = [...INDUSTRY_L1];
+export async function fetchPool(token, stratKey = 'uptrend', maxPasses = 3, minGap = DEFAULT_MIN_GAP, deadline = 0) {
+  const cfg = STRATEGIES[stratKey] || STRATEGIES.uptrend;
   const collected = new Map();
   let tradeDate = '';
   let failed = [];
 
-  for (let pass = 0; pass < maxPasses && todo.length; pass++) {
+  for (let pass = 0; pass < maxPasses && failed.length < EXCHANGE_SEGS.length; pass++) {
     // 墙钟预算：Workers 免费版 cron 有 30s 上限，必须赶在 deadline 前收尾
     if (deadline && Date.now() > deadline) break;
     if (pass > 0) {
-      // 上一轮有失败，先退避一段时间再补抓，避开问财风控窗口
-      const wait = 8000 * pass;
-      if (deadline && Date.now() + wait > deadline) break; // 退避完就没时间了，交给下一轮 cron
+      // 上一轮有失败，先退避再补抓，避开问财风控窗口
+      const wait = 6000 * pass;
+      if (deadline && Date.now() + wait > deadline) break;
       await new Promise((res) => setTimeout(res, wait));
     }
+    const segs = EXCHANGE_SEGS.filter((s) => !failed.includes(s.q));
+    if (!segs.length) break;
     const results = await mapLimit(
-      todo,
+      segs,
       2, // 并发压到 2：问财对突发并发很敏感
-      async (ind) => {
-        const res = await wencaiQuery(`${BASE_COND} ${ind} ${EXTRA_FIELDS}`, token);
-        return { ind, ...res };
+      async (seg) => {
+        const res = await wencaiQuery(`${cfg.cond} ${seg.q} ${cfg.extra}`, token, 2);
+        return { seg, ...res };
       },
       minGap
     );
 
-    failed = [];
     for (const r of results) {
       if (!r) continue;
+      if (r.error) { failed.push(r.seg.q); continue; } // 真实错误（限流/解析异常）才重试；0 行不算失败
       if (r.tradeDate && !tradeDate) tradeDate = r.tradeDate;
-      if (!r.rows || !r.rows.length) {
-        failed.push(r.ind); // 无数据：被限流或该行业确实无命中，下一轮重试
-        continue;
-      }
-      for (const row of r.rows) {
+      for (const row of r.rows || []) {
         const s = normRow(row);
         if (s.code && !collected.has(s.code)) collected.set(s.code, s);
       }
     }
-    todo = failed;
   }
 
-  return { stocks: [...collected.values()], tradeDate, failed };
+  let stocks = [...collected.values()];
+  // 均线多头排列：按成交额由大到小排列（用户明确要求）
+  if (stratKey === 'ma') {
+    stocks.sort((a, b) => (b.amount || 0) - (a.amount || 0));
+  }
+  return { stocks, tradeDate, failed };
 }
+
+// （增量累积抓取已废弃：改为按交易所分段一次性拉全量，见 fetchPool）
 
 // ---------- 板块统计 ----------
 
@@ -376,7 +405,7 @@ async function readBoardKv(env) {
   }
 }
 
-async function writeBoardKv(env, data) {
+export async function writeBoardKv(env, data) {
   const kv = env.UPTREND_KV;
   if (!kv) return;
   try {
@@ -389,14 +418,14 @@ async function writeBoardKv(env, data) {
 // ---------- 日环比（新进入 / 退出）----------
 // 依赖 KV 里存的上一交易日快照；未配置 KV 时优雅降级（前端显示 —）。
 
-async function computeDiff(env, stocks, dateStr) {
+async function computeDiff(env, stocks, dateStr, stratKey = 'uptrend') {
   const kv = env.UPTREND_KV;
   if (!kv) {
     return { prev_date: '', new: [], exited: [], new_count: 0, exited_count: 0, has_baseline: false };
   }
   let prev = null;
   try {
-    const raw = await kv.get(`snapshot:${dateStr}`);
+    const raw = await kv.get(`snapshot:${stratKey}:${dateStr}`);
     if (raw) prev = JSON.parse(raw);
   } catch {
     /* ignore */
@@ -414,6 +443,7 @@ async function computeDiff(env, stocks, dateStr) {
     ind_l2: s.ind_l2,
     ind_l3: s.ind_l3,
     concepts: s.concepts || [],
+    amount: s.amount,
     is_st: s.is_st,
   });
 
@@ -442,7 +472,7 @@ async function computeDiff(env, stocks, dateStr) {
 
   // 保存今日快照（供下次对比），短期过期即可
   try {
-    await kv.put(`snapshot:${dateStr}`, JSON.stringify({ date: dateStr, stocks }), {
+    await kv.put(`snapshot:${stratKey}:${dateStr}`, JSON.stringify({ date: dateStr, stocks }), {
       expirationTtl: 60 * 60 * 24 * 10,
     });
   } catch {
@@ -460,28 +490,19 @@ function todayStr() {
   return `${d.getUTCFullYear()}${p(d.getUTCMonth() + 1)}${p(d.getUTCDate())}`;
 }
 
-async function buildBoard(env, deadline = 0) {
-  const token = getHexinV();
-  const minGap = Number(env.MIN_GAP || DEFAULT_MIN_GAP);
-  const [poolRes, totals] = await Promise.all([
-    fetchPool(token, 3, minGap, deadline),
-    loadTotals(env),
-  ]);
-  const { stocks, tradeDate, failed } = poolRes;
-  if (!stocks.length) {
-    throw new Error('问财未返回任何数据：' + (failed.length ? `失败行业 ${failed.join('/')}` : '未知原因'));
-  }
-
+export async function computeBoardFromStocks(stocks, tradeDate, env, failed = [], stratKey = 'uptrend') {
+  const cfg = STRATEGIES[stratKey] || STRATEGIES.uptrend;
+  const totals = await loadTotals(env);
   const dateStr = tradeDate || todayStr();
   const { boards, noise, coverage } = computeBoards(stocks, totals);
-  const diff = await computeDiff(env, stocks, dateStr);
-
+  const diff = await computeDiff(env, stocks, dateStr, stratKey);
   return {
     date: dateStr,
     generated_at: new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 19).replace('T', ' '),
     realtime: true,
-    source: '同花顺问财 iwencai（口径：上升途中 → 上升通道）',
-    query: `${BASE_COND} ${EXTRA_FIELDS}`,
+    strategy: stratKey,
+    source: cfg.source,
+    query: cfg.query,
     pool: {
       total: stocks.length,
       st: stocks.filter((s) => s.is_st).length,
@@ -496,14 +517,48 @@ async function buildBoard(env, deadline = 0) {
         is_st: s.is_st,
         price: s.price,
         chg: s.chg_pct,
+        amount: s.amount,
       })),
     },
     boards,
     noise,
     coverage,
     diff,
-    _diag: { failed_industries: failed },
+    _diag: { failed_industries: failed, incremental: true },
   };
+}
+
+// 双策略合并：先抓「均线多头排列」（仅 25 只，便宜），再抓「上升途中」（104 只）。
+// 两段都成功才算 complete；不完整时不写 KV/不推送，避免把缺失策略的半成品覆盖掉完整榜。
+async function buildCombined(env, deadline = 0) {
+  const token = getHexinV();
+  const minGap = Number(env.MIN_GAP || DEFAULT_MIN_GAP);
+  const strategies = {};
+  const order = ['ma', 'uptrend'];
+  for (const key of order) {
+    if (deadline && Date.now() > deadline) break;
+    const poolRes = await fetchPool(token, key, 3, minGap, deadline);
+    if (!poolRes.stocks.length) {
+      strategies[key] = null; // 单段失败：记录但不致命，继续抓另一段
+      continue;
+    }
+    strategies[key] = await computeBoardFromStocks(poolRes.stocks, poolRes.tradeDate, env, poolRes.failed, key);
+  }
+  const complete = Object.values(strategies).every((s) => s);
+  const updated_at = new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 19).replace('T', ' ');
+  return { updated_at, strategies, complete };
+}
+
+// 单策略完整抓取（仅备用/手动触发；常规刷新走 scheduled 的 buildCombined）
+async function buildBoard(env, deadline = 0) {
+  const token = getHexinV();
+  const minGap = Number(env.MIN_GAP || DEFAULT_MIN_GAP);
+  const poolRes = await fetchPool(token, 'uptrend', 3, minGap, deadline);
+  const { stocks, tradeDate, failed } = poolRes;
+  if (!stocks.length) {
+    throw new Error('问财未返回任何数据：' + (failed.length ? `失败行业 ${failed.join('/')}` : '未知原因'));
+  }
+  return computeBoardFromStocks(stocks, tradeDate, env, failed, 'uptrend');
 }
 
 // ---------- 回写 GitHub Pages ----------
@@ -539,7 +594,7 @@ async function ghApi(env, method, path, body) {
   return j;
 }
 
-async function pushBoardToGithub(env, data) {
+export async function pushBoardToGithub(env, data) {
   const token = env.GH_TOKEN;
   if (!token) return { skipped: 'no GH_TOKEN' };
   const repo = env.GH_REPO || 'cuijiaweiyy/uptrend-board';
@@ -573,7 +628,10 @@ async function pushBoardToGithub(env, data) {
     base_tree: baseTree,
     tree: [{ path, mode: '100644', type: 'blob', sha: blob.sha }],
   });
-  const msg = `data: ${data.date || ''} 实时看板 ${data.pool ? data.pool.total : '?'} 只`;
+  const _strats = Object.values(data.strategies || {});
+  const _first = _strats[0] || {};
+  const _total = _strats.reduce((n, s) => n + ((s.pool && s.pool.total) || 0), 0);
+  const msg = `data: ${_first.date || ''} 双策略实时看板 共 ${_total} 只`;
   const newCommit = await ghApi(env, 'POST', `/repos/${repo}/git/commits`, {
     message: msg,
     tree: tree.sha,
@@ -596,7 +654,7 @@ export default {
     if (url.pathname === '/api/health') {
       try {
         const token = getHexinV();
-        const probe = await wencaiQuery(`${BASE_COND} 北交所 ${EXTRA_FIELDS}`, token, 0);
+        const probe = await wencaiQuery(`${STRATEGIES.uptrend.cond} 北交所 ${STRATEGIES.uptrend.extra}`, token, 0);
         return jsonResp({
           ok: !!token && !probe.error,
           token_len: token ? token.length : 0,
@@ -636,20 +694,14 @@ export default {
     }
 
     try {
-      const data = await buildBoard(env);
-      // 只有完整结果才写缓存：否则一次限流导致的残缺数据会被缓存 5 分钟
-      const complete = !(data._diag && data._diag.failed_industries && data._diag.failed_industries.length);
-      const ttl = Number(env.CACHE_TTL || CACHE_TTL);
-      const resp = jsonResp(data, 200, {
-        'Cache-Control': complete ? `public, max-age=${ttl}` : 'no-store',
-        'X-Cache': 'MISS',
-        'X-Data-Complete': complete ? '1' : '0',
-      });
-      if (complete) {
-        ctx.waitUntil(cache.put(cacheKey, resp.clone()));
-        ctx.waitUntil(writeBoardKv(env, data)); // 供后续请求秒回
+      // 不在这里突发抓取（会触发问财限流）：无新鲜 KV 就返回旧榜，靠 cron 预热。
+      if (kvBoard && kvBoard.data) {
+        return jsonResp(kvBoard.data, 200, {
+          'Cache-Control': 'public, max-age=60',
+          'X-Cache': 'KV-STALE',
+        });
       }
-      return resp;
+      return jsonResp({ error: 'no_fresh_data', hint: '等待 cron 预热（每5分钟）' }, 503);
     } catch (e) {
       // 现算失败但 KV 里有旧数据时，宁可返回旧数据也不要空白
       if (kvBoard && kvBoard.data) {
@@ -669,19 +721,23 @@ export default {
   // 为什么必须回写 GitHub：workers.dev 在国内被 DNS 污染，手机直连不上；
   // 而 github.io 可达。所以 Worker 只做计算，Pages 负责投递。
   async scheduled(event, env, ctx) {
-    // 诊断：每轮结果写进 KV。workers.dev 在国内被 DNS 污染、wrangler tail 也连不上，
-    // 只能靠 KV 的 REST 接口回读运行状态。
     const diag = { ts: new Date().toISOString(), cron: event && event.cron };
     try {
-      const data = await buildBoard(env, Date.now() + Number(env.BUILD_BUDGET_MS || 22000));
-      diag.total = data.pool && data.pool.total;
-      const fl = data._diag && data._diag.failed_industries;
-      diag.failed = fl ? fl.length : 0;
-      diag.failedList = fl ? fl.slice(0, 40) : [];
-      const complete = !(fl && fl.length);
-      if (complete) await writeBoardKv(env, data);
-      const pushed = await pushBoardToGithub(env, data);
-      diag.pushed = pushed;
+      // 双策略合并抓取（均线多头排列 + 上升途中），输出 {strategies:{uptrend,ma}}
+      const built = await buildCombined(env, Date.now() + Number(env.ACCUM_BUDGET_MS || 25000));
+      const data = built.complete
+        ? { updated_at: built.updated_at, strategies: built.strategies }
+        : null;
+      diag.strategies = Object.keys(built.strategies).filter((k) => built.strategies[k]);
+      diag.complete = built.complete;
+      // 两段都成功才推送；任一段被限流失败则保留上一次完整榜，绝不把半成品覆盖上去。
+      if (built.complete && data) {
+        await writeBoardKv(env, data);
+        const pushed = await pushBoardToGithub(env, data);
+        diag.pushed = pushed;
+      } else {
+        diag.pushed = 'skipped: incomplete（保留上一次完整榜，不覆盖）';
+      }
     } catch (e) {
       diag.error = String(e && e.message ? e.message : e);
     } finally {

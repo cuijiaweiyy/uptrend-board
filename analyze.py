@@ -197,25 +197,26 @@ def build_board(counter, stock_map, totals):
     return board
 
 
-def compute_diff(date_str):
+def compute_diff(date_str, strat="uptrend"):
     """对比上一交易日股票池，返回当日新进入 / 退出的个股。
 
-    依赖 data/pool_<date>.json 的历史快照（由 fetch_pool 每日生成）。
+    依赖 data/pool_{strat}_{date}.json 的历史快照（由 fetch_pool 每日生成）。
     若无更早的快照，返回 has_baseline=False（首次统计，无对比基准）。
     """
-    pool_path = os.path.join(DATA_DIR, f"pool_{date_str}.json")
+    prefix = f"pool_{strat}_"
+    pool_path = os.path.join(DATA_DIR, f"{prefix}{date_str}.json")
     if not os.path.exists(pool_path):
         return None
     cur = json.load(open(pool_path, encoding="utf-8"))
     cur_map = {s["code"]: s for s in cur["stocks"]}
     cur_codes = set(cur_map)
 
-    # 找上一交易日的池子（严格小于当日的最大日期）
+    # 找上一交易日的池子（严格小于当日的最大日期，且同策略）
     prev_date = ""
     try:
         for fn in os.listdir(DATA_DIR):
-            if fn.startswith("pool_") and fn.endswith(".json"):
-                d = fn[len("pool_"):-len(".json")]
+            if fn.startswith(prefix) and fn.endswith(".json"):
+                d = fn[len(prefix):-len(".json")]
                 if len(d) == 8 and d < date_str and d > prev_date:
                     prev_date = d
     except Exception:  # noqa: BLE001
@@ -225,7 +226,7 @@ def compute_diff(date_str):
         return {"prev_date": "", "new": [], "exited": [],
                 "new_count": 0, "exited_count": 0, "has_baseline": False}
 
-    prev = json.load(open(os.path.join(DATA_DIR, f"pool_{prev_date}.json"), encoding="utf-8"))
+    prev = json.load(open(os.path.join(DATA_DIR, f"{prefix}{prev_date}.json"), encoding="utf-8"))
     prev_map = {s["code"]: s for s in prev["stocks"]}
     prev_codes = set(prev_map)
 
@@ -247,9 +248,12 @@ def compute_diff(date_str):
             "new_count": len(new), "exited_count": len(exited), "has_baseline": True}
 
 
-def main(date_str=None):
+def main(date_str=None, strat="uptrend"):
     date_str = date_str or latest_date()
-    pool_path = os.path.join(DATA_DIR, f"pool_{date_str}.json")
+    pool_path = os.path.join(DATA_DIR, f"pool_{strat}_{date_str}.json")
+    if not os.path.exists(pool_path):
+        # 兼容旧文件名（单策略历史快照）
+        pool_path = os.path.join(DATA_DIR, f"pool_{date_str}.json")
     if not os.path.exists(pool_path):
         print(f"找不到股票池文件：{pool_path}")
         raise SystemExit(1)
@@ -293,8 +297,9 @@ def main(date_str=None):
     result = {
         "date": date_str,
         "generated_at": dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "source": "同花顺问财 iwencai（口径：上升途中 → 上升通道）",
+        "source": pool.get("source", "同花顺问财 iwencai"),
         "query": pool.get("query", ""),
+        "strategy": strat,
         "pool": {
             "total": len(stocks),
             "st": sum(1 for s in stocks if s["is_st"]),
@@ -318,7 +323,7 @@ def main(date_str=None):
 
     # 日环比：与上一交易日对比，拆出新进入 / 退出的个股
     try:
-        diff = compute_diff(date_str)
+        diff = compute_diff(date_str, strat)
         if diff is not None:
             result["diff"] = diff
             print(f"  日环比：对比 {diff.get('prev_date') or '无'} → "
@@ -326,7 +331,7 @@ def main(date_str=None):
     except Exception as e:  # noqa: BLE001
         print(f"  [warn] 差集计算跳过：{e}")
 
-    out_path = os.path.join(DATA_DIR, f"stats_{date_str}.json")
+    out_path = os.path.join(DATA_DIR, f"stats_{strat}_{date_str}.json")
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump(result, f, ensure_ascii=False, indent=2)
 
@@ -342,4 +347,5 @@ def main(date_str=None):
 
 if __name__ == "__main__":
     import sys
-    main(sys.argv[1] if len(sys.argv) > 1 else None)
+    main(sys.argv[1] if len(sys.argv) > 1 else None,
+         sys.argv[2] if len(sys.argv) > 2 else "uptrend")

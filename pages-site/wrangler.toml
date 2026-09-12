@@ -1,0 +1,13 @@
+name = "uptrend-board-func"
+pages_build_output_dir = "public"
+compatibility_date = "2026-09-12"
+
+# 与 Worker 共用同一 KV 命名空间，保证缓存互通
+[[kv_namespaces]]
+binding = "UPTREND_KV"
+id = "a51fa85529a04774a8144e6dd5b57905"
+
+[vars]
+TOTALS_URL = "https://cuijiaweiyy.github.io/uptrend-board/totals.json"
+CACHE_TTL = 300
+MIN_GAP = 450

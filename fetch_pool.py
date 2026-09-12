@@ -16,6 +16,28 @@ BASE_COND = "上升途中"
 EXTRA_FIELDS = "所属同花顺行业 所属概念"
 SEGMENTS = ["沪市A股", "深市A股", "北交所"]
 
+# ---- 双策略配置（与前端 STRAT_META 对应）----
+# uptrend：上升途中（口径=上升通道）
+# ma     ：日均线多头排列 + 周均线多头排列 + 可交易，按成交额由大到小排列
+STRATEGIES = {
+    "uptrend": {
+        "label": "上升途中",
+        "cond": "上升途中",
+        "extra": "所属同花顺行业 所属概念",
+        "source_note": "同花顺问财 iwencai（口径：上升途中 → 上升通道）",
+        "query_note": "上升途中 所属同花顺行业 所属概念",
+        "sort_by_amount": False,
+    },
+    "ma": {
+        "label": "均线多头排列",
+        "cond": "日均线多头排列 周均线多头排列 可交易",
+        "extra": "所属同花顺行业 所属概念 成交额",
+        "source_note": "同花顺问财 iwencai（日均线多头排列 + 周均线多头排列 + 可交易）",
+        "query_note": "日均线多头排列 周均线多头排列 可交易 所属同花顺行业 所属概念 成交额",
+        "sort_by_amount": True,
+    },
+}
+
 INDUSTRY_L1 = [
     "农林牧渔", "基础化工", "钢铁", "有色金属", "电子", "汽车", "家用电器",
     "食品饮料", "纺织服饰", "轻工制造", "医药生物", "公用事业", "交通运输",
@@ -61,6 +83,17 @@ def norm_row(r):
         market_code, full_code.split(".")[-1] if "." in full_code else ""
     )
 
+    # 成交额（MA 策略按它排序）：问财返回键形如「成交额[20260911]」
+    amount = None
+    for k, v in r.items():
+        if (k.startswith("成交额[") or k == "成交额") and v not in (None, "", "--"):
+            try:
+                amount = round(float(v), 2)
+            except (TypeError, ValueError):
+                amount = None
+            if amount is not None:
+                break
+
     return {
         "code": code6,
         "full_code": full_code,
@@ -68,6 +101,7 @@ def norm_row(r):
         "exchange": exchange,
         "price": fnum(pick("最新价")),
         "chg_pct": fnum(pick("最新涨跌幅")),
+        "amount": amount,
         "ind_l1": parts[0] if len(parts) > 0 else "",
         "ind_l2": parts[1] if len(parts) > 1 else "",
         "ind_l3": parts[2] if len(parts) > 2 else "",
@@ -109,13 +143,14 @@ def fetch_segment(cond, extra=EXTRA_FIELDS):
     return out, trade_date
 
 
-def main():
+def fetch_strategy(key, cfg):
+    """抓取单个策略的股票池，写入 pool_{key}_{date}.json，返回交易日字符串。"""
     today = dt.date.today().strftime("%Y%m%d")
-    print(f"开始抓取：{BASE_COND}（同花顺问财口径）  系统日期 {today}")
+    print(f"\n==== 开始抓取：{cfg['label']}（{cfg['cond']}）  系统日期 {today}")
     raw = []
     trade_date = ""
     for seg in SEGMENTS:
-        rows, td = fetch_segment(f"{BASE_COND} {seg}")
+        rows, td = fetch_segment(f"{cfg['cond']} {seg}", extra=cfg["extra"])
         raw += rows
         trade_date = trade_date or td
         time.sleep(0.3)
@@ -127,9 +162,13 @@ def main():
             seen.add(s["code"])
             stocks.append(s)
 
+    # MA 策略：按成交额由大到小排列（问财自然排序不保证，故本地再排）
+    if cfg.get("sort_by_amount"):
+        stocks.sort(key=lambda s: (s.get("amount") or 0), reverse=True)
+
     if not stocks:
-        print("抓取失败：无数据")
-        sys.exit(1)
+        print(f"  [{key}] 抓取失败：无数据")
+        return None
 
     # 以问财返回的交易日期为准，避免节假日运行时把上一交易日数据标成当天
     date_str = trade_date or today
@@ -138,21 +177,22 @@ def main():
     payload = {
         "date": date_str,
         "trade_date": date_str,
-        "query": f"{BASE_COND} {EXTRA_FIELDS}",
-        "source": "同花顺问财 iwencai",
+        "query": cfg["query_note"],
+        "source": cfg["source_note"],
+        "strategy": key,
         "fetched_at": dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "count": len(stocks),
         "stocks": stocks,
     }
     os.makedirs(OUT_DIR, exist_ok=True)
-    path = os.path.join(OUT_DIR, f"pool_{date_str}.json")
+    path = os.path.join(OUT_DIR, f"pool_{key}_{date_str}.json")
     with open(path, "w", encoding="utf-8") as f:
         json.dump(payload, f, ensure_ascii=False, indent=2)
     with open(os.path.join(OUT_DIR, "latest_date.txt"), "w", encoding="utf-8") as f:
         f.write(date_str)
 
     st_cnt = sum(1 for s in stocks if s["is_st"])
-    print(f"\n抓取完成 -> {path}")
+    print(f"\n抓取完成[{key}] -> {path}")
     print(f"  股票数: {len(stocks)}（其中 ST {st_cnt} 只）")
     ex = {}
     for s in stocks:
@@ -161,6 +201,19 @@ def main():
     print(f"  行业覆盖: {len({s['industry'] for s in stocks})} 个三级行业 / "
           f"{len({s['ind_l1'] for s in stocks})} 个一级行业")
     print(f"  概念覆盖: {len({c for s in stocks for c in s['concepts']})} 个独立概念")
+    return date_str
+
+
+def main():
+    date_str = None
+    for key, cfg in STRATEGIES.items():
+        d = fetch_strategy(key, cfg)
+        if d:
+            date_str = date_str or d
+    if not date_str:
+        print("全部策略抓取失败")
+        sys.exit(1)
+    print(f"\n全部策略抓取完成，交易日 {date_str}")
 
 
 if __name__ == "__main__":

@@ -507,7 +507,7 @@ function renderTable(rows) {
         var cls = (s.chg === null || s.chg === undefined) ? 'flat' : (s.chg >= 0 ? 'up' : 'down');
         var chg = (s.chg === null || s.chg === undefined) ? '—' : (s.chg >= 0 ? '+' : '') + s.chg.toFixed(2) + '%';
         var consSrc = (s.concepts && s.concepts.length) ? s.concepts
-          : String(s.industry || '').split(/[，,、/\-]+/).filter(Boolean);
+          : String(s.industry || '').split(/[，,、/\\-]+/).filter(Boolean);
         var allCons = consSrc.slice(0, 8);
         var shown = allCons.slice(0, 3);
         var extra = allCons.slice(3);
@@ -619,7 +619,7 @@ function renderDiff() {
     var chg = (s.chg === null || s.chg === undefined) ? '—' : (s.chg >= 0 ? '+' : '') + s.chg.toFixed(2) + '%';
     var cls = (s.chg === null || s.chg === undefined) ? 'flat' : (s.chg >= 0 ? 'up' : 'down');
     var allCons = (s.concepts && s.concepts.length) ? s.concepts
-      : String(s.industry || s.ind_l3 || s.ind_l2 || s.ind_l1 || '').split(/[，,、/\-]+/).filter(Boolean);
+      : String(s.industry || s.ind_l3 || s.ind_l2 || s.ind_l1 || '').split(/[，,、/\\-]+/).filter(Boolean);
     var MAXC = 3;
     var shown = allCons.slice(0, MAXC);
     var extra = allCons.slice(MAXC);
@@ -739,6 +739,49 @@ render();
 renderNoise();
 renderConclusion();
 
+/* ===== 实时数据：打开页面即拉当下最新名单 ===== */
+(function(){
+  var SRC = window.UPTREND_BOARD || 'board.json';
+  var el = document.createElement('div');
+  el.id = 'rtStatus';
+  el.style.cssText = 'position:fixed;right:10px;bottom:10px;z-index:9999;padding:6px 10px;' +
+    'border-radius:999px;font-size:12px;line-height:1.2;color:#fff;' +
+    'background:rgba(0,0,0,.55);box-shadow:0 2px 8px rgba(0,0,0,.25);' +
+    'pointer-events:none;transition:opacity .3s,background .3s;max-width:70vw';
+  document.body.appendChild(el);
+  function set(txt, bg){ if(!el) return; el.textContent = txt; if(bg) el.style.background = bg; }
+
+  set('正在获取最新名单…', 'rgba(0,0,0,.55)');
+  var slow = setTimeout(function(){ set('实时数据较慢，先显示快照', 'rgba(180,120,0,.9)'); }, 8000);
+
+  fetch(SRC, { cache: 'no-store' })
+    .then(function(r){
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.json();
+    })
+    .then(function(d){
+      if (!d || !d.boards || !d.pool) throw new Error('数据格式异常');
+      clearTimeout(slow);
+      window.DATA = d;
+      try {
+        render();
+        renderNoise();
+        renderConclusion();
+        var t = String(d.generated_at || '').slice(11, 16);
+        set('实时 · ' + (t || '刚刚') + ' · ' + d.pool.total + ' 只', 'rgba(0,140,70,.92)');
+        setTimeout(function(){ if (el && el.style) el.style.opacity = '0.35'; }, 4000);
+      } catch (e) {
+        location.reload();  // 结构变化导致渲染异常时，重载用新数据重跑
+      }
+    })
+    .catch(function(e){
+      clearTimeout(slow);
+      set('实时失败，显示 ' + (DATA.date || '') + ' 快照', 'rgba(170,40,40,.92)');
+      setTimeout(function(){ if (el && el.style) el.style.opacity = '0.4'; }, 3000);
+    });
+})();
+
+
 // ===== K 线触发：事件委托（chip / diffrow）=====
 document.addEventListener('click', function(e){
   if (e.target.closest && e.target.closest('.dmore')) return;  // 详情按钮不触发 K 线
@@ -762,7 +805,7 @@ document.addEventListener('click', function(e){
 
 // ===== 搜索框：脱离股票池也能查任意股票 =====
 (function(){
-  var pool = (DATA.pool && DATA.pool.stocks) || [];
+  function getPool(){ return (DATA.pool && DATA.pool.stocks) || []; }
   // 常用汉字 → 拼音首字母（覆盖 A 股常见字）
   var PY = {"长":"C","创":"C","超":"C","成":"C","重":"C","传":"C","城":"C","川":"C","驰":"C","春":"C","楚":"C","辰":"C","崇":"C","淳":"C","慈":"C","赐":"C",
             "东":"D","大":"D","电":"D","地":"D","德":"D","道":"D","达":"D","多":"D","迪":"D","典":"D","鼎":"D","都":"D","端":"D","敦":"D",
@@ -799,12 +842,12 @@ document.addEventListener('click', function(e){
     var hint = document.getElementById('kSearchHint');
     if (!q) { hint.textContent = '提示：输入 6 位代码（如 600519）或名称（如 茅台）'; return; }
     if (/^\\d{6}$/.test(q)) { openKline(q); hint.textContent=''; return; }
-    var codeHit = pool.find(function(s){ return s.code.indexOf(q) === 0; });
+    var codeHit = getPool().find(function(s){ return s.code.indexOf(q) === 0; });
     if (codeHit) { openKline(codeHit.code); hint.textContent = codeHit.code + ' ' + codeHit.name; return; }
-    var nameHit = pool.find(function(s){ return s.name && s.name.indexOf(q) >= 0; });
+    var nameHit = getPool().find(function(s){ return s.name && s.name.indexOf(q) >= 0; });
     if (nameHit) { openKline(nameHit.name ? nameHit.code : ''); hint.textContent = nameHit.code + ' ' + nameHit.name; return; }
     var qLow = q.toLowerCase();
-    var pyHit = pool.find(function(s){ return pyInitial(s.name) === qLow; });
+    var pyHit = getPool().find(function(s){ return pyInitial(s.name) === qLow; });
     if (pyHit) { openKline(pyHit.code); hint.textContent = pyHit.code + ' ' + pyHit.name + ' (拼音首字母)'; return; }
     if (/^\\d{4,6}$/.test(q)) {
       openKline(String(q).padStart(6, '0'));
@@ -1202,7 +1245,10 @@ def enrich_amounts(data, date_str):
 
 def main(date_str=None):
     date_str = date_str or dt.date.today().strftime("%Y%m%d")
-    stats_path = os.path.join(DATA_DIR, f"stats_{date_str}.json")
+    # 首屏嵌入「上升途中」单策略数据（运行时再拉取 combined board.json 覆盖）
+    stats_path = os.path.join(DATA_DIR, f"stats_uptrend_{date_str}.json")
+    if not os.path.exists(stats_path):
+        stats_path = os.path.join(DATA_DIR, f"stats_{date_str}.json")
     if not os.path.exists(stats_path):
         # 当年所在日期无 stats 时，回退到 data 目录中最新的 stats_*.json，
         # 保证看板始终能用真实历史数据生成（而非崩溃/空板）
@@ -1217,7 +1263,14 @@ def main(date_str=None):
 
     data = pack_data(data)
     data_json = json.dumps(data, ensure_ascii=False, separators=(",", ":")).replace("</", "<\\/")
-    html = (TPL
+    # 模板优先用 template.html（保留所有手工调校的 K 线样式 / 双策略 tab），
+    # 缺失时回退到代码内联 TPL 常量。
+    tpl_path = os.path.join(HERE, "template.html")
+    tpl = TPL
+    if os.path.exists(tpl_path):
+        with open(tpl_path, encoding="utf-8") as tf:
+            tpl = tf.read()
+    html = (tpl
             .replace("__DATA__", data_json)
             .replace("__DATE__", date_str)
             .replace("__GEN__", data.get("generated_at", ""))

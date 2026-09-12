@@ -1,19 +1,45 @@
-# 生成产物（发布内容在 docs/ 目录）
+# ===== 凭证 / 密钥（绝不提交）=====
+*_token.txt
+*.token
+.env
+.env.*
+**/*_token.txt
+
+# ===== 临时 / 调试产物（本机探索遗留，勿入库）=====
+_*.py
+_*.mjs
+_*.js
+_*.sh
+_*.log
+_*.html
+_*.txt
+_probe*
+_patch*
+_test*
+_validate*
+_wait*
+_gen*
+_chk*
+_tail*
+_syntax*
+_dryrun/
+_login*
+_watch*
+
+# ===== 中间大数据（每次 Actions 重建，不入库；仅保留股票池基线供 diff）=====
+data/stats_*.json
+data/amount_cache_*.json
+data/pool_2026[0-9][0-9][0-9][0-9].json
+data/latest_date.txt
+!data/pool_uptrend_*.json
+!data/pool_ma_*.json
+!data/totals_cache.json
+
+# ===== 构建缓存 / 产物 =====
+worker/.wrangler/
+pages-site/.wrangler/
+worker/bundle.js
 output/
-_js_check.js
-_board_check.html
-_check.js
+
+# 调度锁文件
 .sched_lock
-
-# Python
-__pycache__/
-*.py[cod]
-*.egg-info/
-.venv/
-venv/
-
-# 编辑器 / 系统
-.vscode/
-.idea/
-.DS_Store
-Thumbs.db

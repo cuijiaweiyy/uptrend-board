@@ -871,7 +871,7 @@ KLINE_MODAL_HTML = r"""<style>
         for (var i = 0; i < rows.length; i++) {
           var r = rows[i];
           dates.push(r[0]);
-          ohlc.push([Number(r[1]), Number(r[2]), Number(r[4]), Number(r[3])]);
+          ohlc.push([Number(r[1]), Number(r[2]), Number(r[3]), Number(r[4])]);
           vols.push(Number(r[5]));
         }
         return {
@@ -968,7 +968,7 @@ KLINE_MODAL_HTML = r"""<style>
       for (var i = 0; i < kl.length; i++) {
         var p = String(kl[i]).split(',');
         dates.push(p[0]);
-        ohlc.push([Number(p[1]), Number(p[2]), Number(p[4]), Number(p[3])]); // 开,收,高,低
+        ohlc.push([Number(p[1]), Number(p[2]), Number(p[3]), Number(p[4])]); // 开,收,高,低
         vols.push(Number(p[5]));
       }
       return {
