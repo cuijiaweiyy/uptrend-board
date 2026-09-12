@@ -13,6 +13,7 @@ _*.sh
 _*.log
 _*.html
 _*.txt
+_*.json
 _probe*
 _patch*
 _test*
@@ -40,6 +41,11 @@ worker/.wrangler/
 pages-site/.wrangler/
 worker/bundle.js
 output/
+
+# 依赖目录（本地 npm install 产生，Actions 里会自己装）
+node_modules/
+**/node_modules/
+package-lock.json
 
 # 调度锁文件
 .sched_lock
