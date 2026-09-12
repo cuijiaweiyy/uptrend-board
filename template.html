@@ -1894,9 +1894,36 @@ var STRAT_META = {
     query: '日均线多头排列 周均线多头排列 可交易 所属同花顺行业 所属概念 成交额'
   }
 };
+/* 「均线多头排列」离线兜底数据（build_html.py 注入，同样做了字典打包，这里还原）。
+   作用：首屏即可切到 MA tab；且当远端 board.json 被旧版单策略程序覆盖时，MA 仍可用。 */
+var MA_FALLBACK = null;
+(function () {
+  var raw = __MA_DATA__;
+  if (!raw || !raw.boards) return;
+  var cd = raw.__cd || [], id = raw.__id || [];
+  function fix(s) {
+    if (!s || typeof s !== 'object') return;
+    if (s.c && cd.length) { s.concepts = s.c.map(function (i) { return cd[i]; }); delete s.c; }
+    if (typeof s.i === 'number' && id.length) { s.industry = id[s.i]; delete s.i; }
+  }
+  var ks = ['industry_l1', 'industry_l2', 'industry_l3', 'concept'];
+  for (var a = 0; a < ks.length; a++) {
+    var arr = (raw.boards || {})[ks[a]] || [];
+    for (var b = 0; b < arr.length; b++) {
+      var sts = arr[b].stocks || [];
+      for (var c = 0; c < sts.length; c++) fix(sts[c]);
+    }
+  }
+  var d = raw.diff || {};
+  ['new', 'gone'].forEach(function (k) { (d[k] || []).forEach(fix); });
+  if (Array.isArray(raw.pool)) raw.pool.forEach(fix);
+  MA_FALLBACK = raw;
+})();
+
 var BOARDS = (DATA && DATA.strategies)
   ? DATA.strategies
-  : { uptrend: DATA, ma: DATA };   // 首屏（嵌入数据仅为 uptrend）先包成双策略
+  : { uptrend: DATA, ma: MA_FALLBACK };  // 首屏两份都嵌入；ma 缺失时留空，
+                                         // 绝不能用 uptrend 数据顶替，否则 MA tab 会串成上升途中名单
 var curStrat = 'uptrend';
 var curDiffView = 'new';
 
@@ -1923,12 +1950,22 @@ function applyStrat(k) {
 }
 
 function applyCombined(payload) {
-  if (!payload || !payload.strategies) {
-    // 兼容旧版单策略 board.json：当作 uptrend 处理
-    if (payload && payload.boards && payload.pool) { BOARDS = { uptrend: payload, ma: payload }; }
-    else return;
+  if (!payload || typeof payload !== 'object') return;
+  if (!payload.strategies) {
+    // 兼容旧版单策略返回值（Worker / Pages Function 尚未升级时）：
+    // 只覆盖 uptrend，保留已有的 ma，绝不能把上升途中数据挂到「均线多头排列」名下。
+    if (payload.boards && payload.pool) {
+      BOARDS = BOARDS || {};
+      BOARDS.uptrend = payload;
+    } else return;
   } else {
-    BOARDS = payload.strategies;
+    // 合并而非整体替换：新包里缺失的策略沿用上一次已加载的，防止刷新导致 tab 空白
+    var merged = {};
+    for (var _k in STRAT_META) merged[_k] = (BOARDS && BOARDS[_k]) || null;
+    for (var _k2 in payload.strategies) {
+      if (payload.strategies[_k2]) merged[_k2] = payload.strategies[_k2];
+    }
+    BOARDS = merged;
   }
   if (!BOARDS[curStrat]) curStrat = 'uptrend';
   applyStrat(curStrat);
@@ -2413,8 +2450,18 @@ var _stabs = document.querySelectorAll('#strattabs .stab');
 for (var _si = 0; _si < _stabs.length; _si++) {
   _stabs[_si].onclick = function () {
     var k = this.getAttribute('data-s');
+    if (!BOARDS || !BOARDS[k]) {
+      // 该策略数据尚未到达（首屏只嵌入 uptrend），提示而不切换，避免显示错误名单
+      var _rt = document.getElementById('rtStatus');
+      if (_rt) {
+        _rt.textContent = '「均线多头排列」数据加载中…';
+        _rt.style.background = 'rgba(180,120,0,.9)';
+        _rt.style.opacity = '1';
+      }
+      return;
+    }
     var _sa = document.querySelectorAll('#strattabs .stab');
-    for (var _j = 0; _j < _sa.length; _j++) { _sa[j].classList.remove('on'); }
+    for (var _sj = 0; _sj < _sa.length; _sj++) { _sa[_sj].classList.remove('on'); }
     this.classList.add('on');
     applyStrat(k);
   };
@@ -2426,7 +2473,7 @@ for (var _di = 0; _di < _dtabs.length; _di++) {
   _dtabs[_di].onclick = function () {
     var v = this.getAttribute('data-d');
     var _da = document.querySelectorAll('#segDiff .tab');
-    for (var _j = 0; _j < _da.length; _j++) { _da[j].classList.remove('on'); }
+    for (var _dj = 0; _dj < _da.length; _dj++) { _da[_dj].classList.remove('on'); }
     this.classList.add('on');
     curDiffView = v;
     renderDiff(v);

@@ -530,7 +530,7 @@ export async function computeBoardFromStocks(stocks, tradeDate, env, failed = []
 
 // 双策略合并：先抓「均线多头排列」（仅 25 只，便宜），再抓「上升途中」（104 只）。
 // 两段都成功才算 complete；不完整时不写 KV/不推送，避免把缺失策略的半成品覆盖掉完整榜。
-async function buildCombined(env, deadline = 0) {
+export async function buildCombined(env, deadline = 0) {
   const token = getHexinV();
   const minGap = Number(env.MIN_GAP || DEFAULT_MIN_GAP);
   const strategies = {};

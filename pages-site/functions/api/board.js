@@ -5,7 +5,7 @@
 // Cloudflare Pages（*.pages.dev，通常国内可达），由页面打开时触发，做到「看时最新」。
 //
 // 复用 cloud/worker/index.js 中已验证的计算逻辑（hexin-v 生成 + 问财抓取 + 板块统计）。
-import { getHexinV, fetchPool, computeBoardFromStocks, pushBoardToGithub, writeBoardKv } from '../../../worker/index.js';
+import { getHexinV, buildCombined, pushBoardToGithub, writeBoardKv } from '../../../worker/index.js';
 
 const BOARD_KEY = 'board:latest';
 const STALE_MS = 20 * 60 * 1000; // 与 Worker 共用同一 KV 键，保证缓存互通
@@ -40,15 +40,8 @@ async function readBoardKv(env) {
   }
 }
 
-// 一次性完整抓取（沪+深分段拉全量）+ 板块统计
-async function buildBoard(env, deadline = 0) {
-  const token = getHexinV();
-  const minGap = Number(env.MIN_GAP || 450);
-  const poolRes = await fetchPool(token, 3, minGap, deadline);
-  const { stocks, tradeDate, failed } = poolRes;
-  if (!stocks.length) throw new Error('问财未返回任何数据');
-  return computeBoardFromStocks(stocks, tradeDate, env, failed);
-}
+// 双策略：buildCombined 内部复用 worker/index.js 的抓取 + 板块统计逻辑
+// （这里不再自建 buildBoard，避免与 worker 的 fetchPool 签名漂移）
 
 export async function onRequestOptions() {
   return new Response(null, { status: 204, headers: corsHeaders() });
@@ -70,20 +63,27 @@ export async function onRequestGet({ request, env, waitUntil }) {
   // 打开即算：页面带 refresh=1 调用，现算现回（约 10-25s），并异步写 KV + GitHub
   if (refresh) {
     try {
-      const data = await buildBoard(env, Date.now() + 25000);
-      const failed = (data._diag && data._diag.failed_industries) || [];
-      const complete = !failed.length;
-      if (complete || (data.pool && data.pool.total >= 80)) {
-        // 响应先返回最新数据；KV / GitHub 写入异步完成后台进行
+      // 25s 预算内先抓「均线多头排列」（25 只，便宜），再抓「上升途中」（104 只）
+      const combined = await buildCombined(env, Date.now() + 25000);
+      const strats = combined.strategies || {};
+      const got = Object.values(strats).filter(Boolean);
+      if (!got.length) {
+        return jsonResp({ error: 'incomplete', strategies: {} }, 502);
+      }
+      // 只有两段都成功才回写 KV / 推送 GitHub，避免用缺失策略的半成品覆盖完整榜
+      if (combined.complete) {
         waitUntil(
           (async () => {
-            try { await writeBoardKv(env, data); } catch (_) {}
-            try { await pushBoardToGithub(env, data); } catch (_) {}
+            try { await writeBoardKv(env, combined); } catch (_) {}
+            try { await pushBoardToGithub(env, combined); } catch (_) {}
           })()
         );
-        return jsonResp(data, 200, { 'X-Cache': 'FRESH' });
       }
-      return jsonResp({ error: 'incomplete', failed, total: data.pool && data.pool.total }, 502);
+      return jsonResp(combined, 200, {
+        'X-Cache': 'FRESH',
+        'X-Strategies': got.map((s) => s.strategy).join(','),
+        'X-Complete': combined.complete ? '1' : '0',
+      });
     } catch (e) {
       return jsonResp({ error: 'build_failed', message: String(e && e.message ? e.message : e) }, 502);
     }

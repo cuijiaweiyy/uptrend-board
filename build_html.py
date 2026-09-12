@@ -1263,6 +1263,20 @@ def main(date_str=None):
 
     data = pack_data(data)
     data_json = json.dumps(data, ensure_ascii=False, separators=(",", ":")).replace("</", "<\\/")
+
+    # 「均线多头排列」离线兜底：把 MA 策略数据一并嵌入首屏。
+    # 目的：万一远端 board.json 被旧版单策略 Worker 覆盖，MA tab 仍能显示真实数据，
+    # 而不是永远停在「加载中」。
+    ma_json = "null"
+    ma_path = os.path.join(DATA_DIR, f"stats_ma_{date_str}.json")
+    if os.path.exists(ma_path):
+        with open(ma_path, encoding="utf-8") as f:
+            ma_data = json.load(f)
+        enrich_amounts(ma_data, date_str)
+        ma_data = pack_data(ma_data)
+        ma_json = json.dumps(ma_data, ensure_ascii=False, separators=(",", ":")).replace("</", "<\\/")
+    else:
+        print(f"  [warn] 未找到 {os.path.basename(ma_path)}，MA tab 首屏将等待 board.json")
     # 模板优先用 template.html（保留所有手工调校的 K 线样式 / 双策略 tab），
     # 缺失时回退到代码内联 TPL 常量。
     tpl_path = os.path.join(HERE, "template.html")
@@ -1272,6 +1286,7 @@ def main(date_str=None):
             tpl = tf.read()
     html = (tpl
             .replace("__DATA__", data_json)
+            .replace("__MA_DATA__", ma_json)
             .replace("__DATE__", date_str)
             .replace("__GEN__", data.get("generated_at", ""))
             .replace("__DATETIME__", data.get("generated_at") or dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
