@@ -2251,6 +2251,8 @@ renderConclusion();
 /* ===== 实时数据：打开页面即拉当下最新名单 ===== */
 (function(){
   var SRC = window.UPTREND_BOARD || 'board.json';
+  // 按需计算端点（Cloudflare Pages，通常国内可达）；被墙时自动降级为定时快照
+  var PAGES_API = 'https://uptrend-board-func.pages.dev';
   var el = document.createElement('div');
   el.id = 'rtStatus';
   el.style.cssText = 'position:fixed;right:10px;bottom:10px;z-index:9999;padding:6px 10px;' +
@@ -2258,38 +2260,66 @@ renderConclusion();
     'background:rgba(0,0,0,.55);box-shadow:0 2px 8px rgba(0,0,0,.25);' +
     'pointer-events:none;transition:opacity .3s,background .3s;max-width:70vw';
   document.body.appendChild(el);
-  function set(txt, bg){ if(!el) return; el.textContent = txt; if(bg) el.style.background = bg; }
+  function set(txt, bg){ if(!el) return; el.textContent = txt; if(bg) el.style.background = bg; el.style.opacity = '1'; }
+  function apply(d){
+    window.DATA = d;
+    try {
+      render(); renderNoise(); renderConclusion();
+      var t = String(d.generated_at || '').slice(11, 16);
+      set('实时 · ' + (t || '刚刚') + ' · ' + d.pool.total + ' 只', 'rgba(0,140,70,.92)');
+      setTimeout(function(){ if (el && el.style) el.style.opacity = '0.35'; }, 4000);
+    } catch (e) {
+      location.reload(); // 结构变化导致渲染异常时，重载用新数据重跑
+    }
+  }
 
   set('正在获取最新名单…', 'rgba(0,0,0,.55)');
-  var slow = setTimeout(function(){ set('实时数据较慢，先显示快照', 'rgba(180,120,0,.9)'); }, 8000);
+  var slow = setTimeout(function(){ set('加载较慢，先显示最近快照', 'rgba(180,120,0,.9)'); }, 8000);
 
-  // 加时间戳击穿 GitHub Pages CDN 缓存：保证每次打开都取到 Worker 刚推的最新 board.json
+  // 1) 先秒显 GitHub 上的最近快照（一定可达，保证有画面）
+  //    加时间戳击穿 GitHub Pages CDN 缓存：每次打开都取到最新 board.json
   var SRC_Q = SRC + (SRC.indexOf('?') >= 0 ? '&' : '?') + '_=' + Date.now();
   fetch(SRC_Q, { cache: 'no-store' })
-    .then(function(r){
-      if (!r.ok) throw new Error('HTTP ' + r.status);
-      return r.json();
-    })
+    .then(function(r){ if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
     .then(function(d){
       if (!d || !d.boards || !d.pool) throw new Error('数据格式异常');
       clearTimeout(slow);
-      window.DATA = d;
-      try {
-        render();
-        renderNoise();
-        renderConclusion();
-        var t = String(d.generated_at || '').slice(11, 16);
-        set('实时 · ' + (t || '刚刚') + ' · ' + d.pool.total + ' 只', 'rgba(0,140,70,.92)');
-        setTimeout(function(){ if (el && el.style) el.style.opacity = '0.35'; }, 4000);
-      } catch (e) {
-        location.reload();  // 结构变化导致渲染异常时，重载用新数据重跑
-      }
+      apply(d);
     })
     .catch(function(e){
       clearTimeout(slow);
-      set('实时失败，显示 ' + (DATA.date || '') + ' 快照', 'rgba(170,40,40,.92)');
+      set('实时失败，显示 ' + (DATA && DATA.date || '') + ' 快照', 'rgba(170,40,40,.92)');
       setTimeout(function(){ if (el && el.style) el.style.opacity = '0.4'; }, 3000);
     });
+
+  // 2) 打开即算：若 Pages 端点可达，触发一次当下计算并刷新为最新
+  function tryPagesRefresh(){
+    // 先 5s 内探活：pages.dev 被墙时快速失败，不阻塞主流程
+    var c1 = new AbortController();
+    var t1 = setTimeout(function(){ c1.abort(); }, 5000);
+    return fetch(PAGES_API + '/api/health', { signal: c1.signal, cache: 'no-store' })
+      .then(function(h){ clearTimeout(t1); if (!h.ok) throw new Error('health'); return true; })
+      .catch(function(){ clearTimeout(t1); return false; })
+      .then(function(reachable){
+        if (!reachable) return null;
+        set('正在刷新为当下最新…', 'rgba(0,0,0,.6)');
+        // 计算约 10-25s，给足 40s；失败/超时则保留快照
+        var c2 = new AbortController();
+        var t2 = setTimeout(function(){ c2.abort(); }, 40000);
+        return fetch(PAGES_API + '/api/board?refresh=1', { signal: c2.signal, cache: 'no-store' })
+          .then(function(r){ clearTimeout(t2); if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+          .then(function(d){ if (!d || !d.boards || !d.pool) throw new Error('bad'); return d; })
+          .catch(function(){ clearTimeout(t2); return null; });
+      });
+  }
+  tryPagesRefresh().then(function(fresh){
+    if (fresh) {
+      apply(fresh);
+      set('已刷新为当下最新 · ' + fresh.pool.total + ' 只', 'rgba(0,140,70,.95)');
+    } else {
+      set('已显示最近快照（实时端点不可达，定时每15分钟更新）', 'rgba(0,0,0,.55)');
+    }
+  });
 })();
 
 
