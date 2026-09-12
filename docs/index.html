@@ -271,7 +271,7 @@
 .kline-modal {
   position: fixed; inset: 0;
   width: 100vw; height: 100dvh; height: 100vh;  /* 100dvh 避免 iOS Safari URL 栏抖动 */
-  z-index: 9999; background: #0d1117; color: #d9dee8;
+  z-index: 9999; background: #101010; color: #d9dee8;
   display: flex; flex-direction: column; overflow: hidden;
   transform: translateY(100%); transition: transform .28s ease;
   font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
@@ -289,7 +289,7 @@
 .k-status {
   display: flex; align-items: center; justify-content: space-between;
   padding: 3px 14px 2px; font-size: 12px; font-weight: 600;
-  background: #0d1117; color: #fff; flex-shrink: 0;
+  background: #101010; color: #fff; flex-shrink: 0;
   padding-top: max(3px, env(safe-area-inset-top));
 }
 .k-status .l, .k-status .r { display: flex; align-items: center; gap: 5px; }
@@ -456,7 +456,7 @@
 /* ====== 波段雷达面板（4段，参考同花顺） ====== */
 .k-wave-wrap {
   height: 72px; flex-shrink: 0; border-top: 1px solid #1f2533;
-  background: #0d1117; position: relative; width: 100%;
+  background: #101010; position: relative; width: 100%;
 }
 .k-wave-hdr {
   position: absolute; left: 0; right: 0; top: 0; height: 16px;
@@ -706,7 +706,7 @@
 (function(){
   var chart = null, waveChart = null;
   var state = { code: null, mode: 'day70', marks: [], codeList: [] };
-  var C = { up: '#f53636', down: '#1a6e2c', flat: '#c0c5d1',
+  var C = { up: '#f53636', down: '#38a838', flat: '#c0c5d1',
             ma5: '#ffffff', ma10: '#f5b942', ma20: '#9b6dff', ma30: '#5cc8ff' };
 
   function $(id) { return document.getElementById(id); }
@@ -1501,7 +1501,7 @@
       textStyle: { color: '#d9dee8', fontSize: 11 },
       tooltip: {
         trigger: 'axis', axisPointer: { type: 'cross', link: [{xAxisIndex: 'all'}] },
-        backgroundColor: 'rgba(13,17,23,.96)', borderColor: '#2a3247',
+        backgroundColor: 'rgba(16,16,16,.96)', borderColor: '#2a3247',
         textStyle: { color: '#e6e9f0', fontSize: 11 },
         formatter: function(params){
           var i = params[0].dataIndex;
@@ -1584,13 +1584,13 @@
             if (high > Math.max(open, close)) {
               items.push({ type: 'line',
                 shape: { x1: x, y1: yHigh, x2: x, y2: top },
-                style: { stroke: lineColor, lineWidth: 0.6 } });
+                style: { stroke: lineColor, lineWidth: 0.8 } });
             }
             /* 下影线：low → 实体底（仅实体下方） */
             if (low < Math.min(open, close)) {
               items.push({ type: 'line',
                 shape: { x1: x, y1: bot, x2: x, y2: yLow },
-                style: { stroke: lineColor, lineWidth: 0.6 } });
+                style: { stroke: lineColor, lineWidth: 0.8 } });
             }
             /* 矩形（实体） */
             if (bot > top) {
@@ -1766,7 +1766,7 @@
       textStyle: { color: '#d9dee8', fontSize: 11 },
       tooltip: {
         trigger: 'axis', axisPointer: { type: 'cross', link: [{xAxisIndex: 'all'}] },
-        backgroundColor: 'rgba(13,17,23,.96)', borderColor: '#2a3247',
+        backgroundColor: 'rgba(16,16,16,.96)', borderColor: '#2a3247',
         textStyle: { color: '#e6e9f0', fontSize: 11 },
         formatter: function(params){
           var i = params[0].dataIndex;
