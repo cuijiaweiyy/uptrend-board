@@ -1561,13 +1561,52 @@
       ],
       graphic: watermark,
       series: [
-        { name: 'K线', type: 'candlestick', data: d.ohlc,
-          barMaxWidth: 5.5, barMinWidth: 2,
-          /* 阳线（红）实心；阴线（绿）实心 —— 对齐同花顺 */
-          /* 阳线空心（透明+红边），阴线实心 —— 与同花顺一致 */
-          itemStyle: { color: 'transparent', color0: C.down,
-                       borderColor: C.up, borderColor0: C.down,
-                       borderWidth: 0.6 },
+        { name: 'K线', type: 'custom',
+          /* 影线只画实体外的两段（实体内部不画），与同花顺一致 */
+          renderItem: function (params, api) {
+            var ohlc = d.ohlc[params.dataIndex];
+            if (!ohlc) return;
+            var open = ohlc[0], close = ohlc[1], low = ohlc[2], high = ohlc[3];
+            var idx = params.dataIndex;
+            var x = api.coord([idx, open])[0];
+            var yHigh = api.coord([idx, high])[1];
+            var yLow  = api.coord([idx, low ])[1];
+            var yOpen = api.coord([idx, open])[1];
+            var yClose= api.coord([idx, close])[1];
+            var top = Math.min(yOpen, yClose);
+            var bot = Math.max(yOpen, yClose);
+            var isUp = close >= open;
+            var bodyFill = isUp ? 'transparent' : C.down;
+            var lineColor = isUp ? C.up : C.down;
+            var halfW = 2.75;  /* barMaxWidth/2 */
+            var items = [];
+            /* 上影线：实体顶 → high（仅实体上方） */
+            if (high > Math.max(open, close)) {
+              items.push({ type: 'line',
+                shape: { x1: x, y1: yHigh, x2: x, y2: top },
+                style: { stroke: lineColor, lineWidth: 0.6 } });
+            }
+            /* 下影线：low → 实体底（仅实体下方） */
+            if (low < Math.min(open, close)) {
+              items.push({ type: 'line',
+                shape: { x1: x, y1: bot, x2: x, y2: yLow },
+                style: { stroke: lineColor, lineWidth: 0.6 } });
+            }
+            /* 矩形（实体） */
+            if (bot > top) {
+              items.push({ type: 'rect',
+                shape: { x: x - halfW, y: top, width: halfW * 2, height: bot - top },
+                style: { fill: bodyFill, stroke: lineColor, lineWidth: 0.6 } });
+            } else {
+              /* 一字板：横线 */
+              items.push({ type: 'line',
+                shape: { x1: x - halfW, y1: top, x2: x + halfW, y2: top },
+                style: { stroke: lineColor, lineWidth: 0.6 } });
+            }
+            return { type: 'group', children: items };
+          },
+          encode: { x: 0, y: [1, 2, 3, 4] },
+          data: d.ohlc.map(function(r, i){ return [i, r[0], r[1], r[2], r[3]]; }),
           markLine: (dashLines.length || markData.length) ? {
             symbol: 'none', silent: true, clipOverflow: false,
             data: dashLines.concat(markData), animation: false
