@@ -174,7 +174,7 @@
   <h1>上升途中 · 板块统计看板</h1>
   <div class="sub">
     口径：同花顺问财「上升途中」（实际解析为技术形态 <b>上升通道</b>） ·
-    数据时间 2026-09-11 22:26:08<span id="liveTag" style="margin-left:8px;padding:1px 7px;border-radius:4px;background:#eef2ff;color:#4338ca;font-size:11px;font-weight:600;white-space:nowrap;">行情刷新中…</span>
+    数据时间 <span id="dataTime">—</span><span id="liveTag" style="margin-left:8px;padding:1px 7px;border-radius:4px;background:#eef2ff;color:#4338ca;font-size:11px;font-weight:600;white-space:nowrap;">行情刷新中…</span>
   </div>
 
   <div class="cards">
@@ -259,7 +259,7 @@
   </div><!-- /tab-boards -->
 
   <div class="foot">
-    数据来源：同花顺问财 iwencai（口径：上升途中 → 上升通道） ｜ 查询语句：<code>上升途中 所属同花顺行业 所属概念</code> ｜ 数据时间：2026-09-11 22:26:08<br>
+    数据来源：同花顺问财 iwencai（口径：上升途中 → 上升通道） ｜ 查询语句：<code>上升途中 所属同花顺行业 所属概念</code> ｜ 数据时间：<span id="dataTimeFoot">—</span><br>
     口径说明：「上升途中」为技术形态判定，不代表当日上涨；入选个股当日可能为下跌。
     渗透率分母取自问财该板块的全市场成分股数，与分子为同一数据源口径。<br>
     免责声明：以上内容基于公开数据和量化分析，仅供参考，不构成投资建议。市场有风险，投资需谨慎。任何投资决策应结合个人风险承受能力、资金状况和投资目标独立判断，必要时咨询持牌专业机构。过往表现不预示未来收益。
@@ -2265,6 +2265,10 @@ renderConclusion();
     window.DATA = d;
     try {
       render(); renderNoise(); renderConclusion();
+      var _dt = String(d.generated_at || '').trim();
+      var _de1 = document.getElementById('dataTime'); if (_de1) _de1.textContent = _dt || '—';
+      var _de2 = document.getElementById('dataTimeFoot'); if (_de2) _de2.textContent = _dt || '—';
+      if (_dt) try { document.title = '上升途中 · 板块统计看板 ' + _dt.slice(0,10).replace(/-/g,''); } catch(e){}
       var t = String(d.generated_at || '').slice(11, 16);
       set('实时 · ' + (t || '刚刚') + ' · ' + d.pool.total + ' 只', 'rgba(0,140,70,.92)');
       setTimeout(function(){ if (el && el.style) el.style.opacity = '0.35'; }, 4000);
