@@ -455,7 +455,7 @@
 
 /* ====== 波段雷达面板（4段，参考同花顺） ====== */
 .k-wave-wrap {
-  height: 50px; flex-shrink: 0; border-top: 1px solid #1f2533;
+  height: 72px; flex-shrink: 0; border-top: 1px solid #1f2533;
   background: #131722; position: relative; width: 100%;
 }
 .k-wave-hdr {
@@ -707,7 +707,7 @@
   var chart = null, waveChart = null;
   var state = { code: null, mode: 'day70', marks: [], codeList: [] };
   var C = { up: '#ff4438', down: '#16c784', flat: '#c0c5d1',
-            ma5: '#ff90a0', ma10: '#9b6dff', ma20: '#5cc8ff', ma30: '#ffffff' };
+            ma5: '#ef4a4a', ma10: '#f5b942', ma20: '#5cc8ff', ma30: '#9b6dff' };
 
   function $(id) { return document.getElementById(id); }
   function fmt(v, d) { d = d || 2; return (v === null || v === undefined || isNaN(v)) ? '—' : v.toFixed(d); }
@@ -1120,11 +1120,16 @@
           data: {
             code: code, name: txName(code), period: period, days: days,
             dates: dates, ohlc: ohlc, volumes: vols,
-            /* renderKline 读取 d.ma.ma5/ma10/ma20/ma30，键名必须匹配 */
-            ma: { ma5: calcMA(ohlc, 5), ma10: calcMA(ohlc, 10),
-                  ma20: calcMA(ohlc, 20), ma30: calcMA(ohlc, 30) }
-          }
-        };
+        last: { close: ohlc[ohlc.length-1][1], open: ohlc[ohlc.length-1][0],
+                high: ohlc[ohlc.length-1][3], low: ohlc[ohlc.length-1][2],
+                vol: vols[ohlc.length-1] },
+        prev_close: ohlc.length > 1 ? ohlc[ohlc.length-2][1] : ohlc[ohlc.length-1][0],
+        daily_open: ohlc[ohlc.length-1][0], daily_high: ohlc[ohlc.length-1][3],
+        daily_low: ohlc[ohlc.length-1][2], daily_vol: vols[ohlc.length-1],
+        ma: { ma5: calcMA(ohlc, 5), ma10: calcMA(ohlc, 10),
+              ma20: calcMA(ohlc, 20), ma30: calcMA(ohlc, 30) }
+      }
+      };
       });
   }
 
@@ -1217,9 +1222,15 @@
         data: {
           code: code, name: dd.name || code, period: period, days: days,
           dates: dates, ohlc: ohlc, volumes: vols,
-          ma: { ma5: calcMA(ohlc, 5), ma10: calcMA(ohlc, 10),
-                ma20: calcMA(ohlc, 20), ma30: calcMA(ohlc, 30) }
-        }
+        last: { close: ohlc[ohlc.length-1][1], open: ohlc[ohlc.length-1][0],
+                high: ohlc[ohlc.length-1][3], low: ohlc[ohlc.length-1][2],
+                vol: vols[ohlc.length-1] },
+        prev_close: ohlc.length > 1 ? ohlc[ohlc.length-2][1] : ohlc[ohlc.length-1][0],
+        daily_open: ohlc[ohlc.length-1][0], daily_high: ohlc[ohlc.length-1][3],
+        daily_low: ohlc[ohlc.length-1][2], daily_vol: vols[ohlc.length-1],
+        ma: { ma5: calcMA(ohlc, 5), ma10: calcMA(ohlc, 10),
+              ma20: calcMA(ohlc, 20), ma30: calcMA(ohlc, 30) }
+      }
       };
     });
   }
@@ -1258,6 +1269,25 @@
     });
   }
 
+  /* 东财单股详细行情（市值/流通/换手/量比/市盈TTM/成交额），用于补齐 K 线弹窗头部 */
+  function emQuoteDirect(code) {
+    var secid = emSecid(code);
+    var url = 'https://push2.eastmoney.com/api/qt/stock/get?secid=' + secid +
+              '&fields=f2,f3,f4,f5,f6,f8,f9,f10,f20,f21,f43,f45,f48,f57,f58&invt=2';
+    return fetchTxJson(url).then(function(j){
+      var d = (j && j.data) || {};
+      if (!d || !d.f12) return null;
+      return {
+        mv: d.f20 ? d.f20 / 1e8 : null,        // 总市值(亿)
+        cmv: d.f21 ? d.f21 / 1e8 : null,       // 流通市值(亿)
+        hs: d.f8 ? d.f8 : (d.f43 ? d.f43 : null),   // 换手率%
+        lb: d.f10 ? d.f10 : (d.f45 ? d.f45 : null), // 量比
+        pe_ttm: d.f48 ? d.f48 : null,          // 市盈TTM
+        daily_amt: d.f6 ? d.f6 : null          // 成交额(元)
+      };
+    });
+  }
+
   function loadKline() {
     if (!state.code) return;
     setLoading('行情加载中…');
@@ -1274,10 +1304,18 @@
 
     function handle(j) {
       if (!j || !j.ok) { setLoading((j && j.msg) || '加载失败', true); return; }
-      renderHeader(j.data);
-      renderMaLegend(j.data, isMin);
-      if (isMin) { renderMinute(j.data); hide('kWaveWrap'); hideClickInfo(); }
-      else { renderKline(j.data); renderSubHdrs(j.data); renderWaveRadar(j.data); }
+      var curD = j.data;
+      renderHeader(curD);
+      renderMaLegend(curD, isMin);
+      if (isMin) { renderMinute(curD); hide('kWaveWrap'); hideClickInfo(); }
+      else {
+        renderKline(curD); renderSubHdrs(curD); renderWaveRadar(curD);
+        // 异步补全头部市值/流通/换手/量比/市盈TTM/成交额
+        emQuoteDirect(state.code).then(function(q){
+          if (!q) return;
+          renderHeader(Object.assign({}, curD, q));
+        }).catch(function(){});
+      }
     }
     /* 多源兜底：主源东财（与主看板实时行情同源，浏览器已验证可达），兜底腾讯。
        任一成功即渲染；全部失败才提示，文案注明已尝试的源，便于定位。 */
@@ -1476,13 +1514,26 @@
       },
       axisPointer: { link: [{xAxisIndex: 'all'}] },
       grid: [
-        { left: 4, right: 6, top: 2,  height: '40%' },     // 主图（2%→42%）缩 8%
-        { left: 4, right: 6, top: '47%', height: '21%' },  // 成交量（47%→68%）
-        { left: 4, right: 6, top: '69%', height: '15%' }   // 成交额（69%→84%）
+        { left: 4, right: 6, top: 2,  height: '46%' },     // 主图 2%→48%（更贴近同花顺主图占比）
+        { left: 4, right: 6, top: '51%', height: '16%' },  // 成交量 51%→67%
+        { left: 4, right: 6, top: '69%', height: '13%' }   // 成交额 69%→82%
       ],
       xAxis: [
         { type: 'category', data: dates, boundaryGap: true,
-          axisLabel: { fontSize: 10, color: '#6b7488', margin: 6 },
+          axisLabel: {
+            fontSize: 10, color: '#6b7488', margin: 6,
+            /* 等间距显示 5 个日期标签，格式 MM-DD（接近同花顺的 06-29 形式） */
+            formatter: (function(){
+              var step = Math.max(1, Math.floor(dates.length / 5));
+              return function(v, idx){
+                if (idx % step !== 0 && idx !== dates.length - 1) return '';
+                var s = String(dates[idx] || v || '');
+                /* 支持 '20260911' 与 '2026-09-11' 两种格式 */
+                var m = s.match(/^(\d{4})-?(\d{2})-?(\d{2})/);
+                return m ? (m[2] + '-' + m[3]) : s;
+              };
+            })()
+          },
           axisLine: { lineStyle: { color: '#2a3247' } },
           splitLine: { show: false }, axisPointer: { z: 100 } },
         { type: 'category', gridIndex: 1, data: dates, boundaryGap: true,
@@ -1512,8 +1563,8 @@
       series: [
         { name: 'K线', type: 'candlestick', data: d.ohlc,
           barMaxWidth: 4, barMinWidth: 2,
-          /* 阳线（红）空心：实体透明 + 红边；阴线（绿）实心 */
-          itemStyle: { color: 'transparent', color0: C.down,
+          /* 阳线（红）实心；阴线（绿）实心 —— 对齐同花顺 */
+          itemStyle: { color: C.up, color0: C.down,
                        borderColor: C.up, borderColor0: C.down,
                        borderWidth: 1 },
           markLine: (dashLines.length || markData.length) ? {
