@@ -706,7 +706,7 @@
 (function(){
   var chart = null, waveChart = null;
   var state = { code: null, mode: 'day70', marks: [], codeList: [] };
-  var C = { up: '#e64040', down: '#2fa431', flat: '#c0c5d1',
+  var C = { up: '#f53636', down: '#1a6e2c', flat: '#c0c5d1',
             ma5: '#ffffff', ma10: '#f5b942', ma20: '#9b6dff', ma30: '#5cc8ff' };
 
   function $(id) { return document.getElementById(id); }
@@ -1024,7 +1024,7 @@
       yAxis: { type: 'value', show: false, min: 0, max: 100 },
       series: [
         { type: 'line', data: wave1, symbol: 'none', smooth: true,
-          lineStyle: { width: 1.2, color: C.up }, areaStyle: { color: 'rgba(230,64,64,.12)' } },
+          lineStyle: { width: 1.2, color: C.up }, areaStyle: { color: 'rgba(245,54,54,.14)' } },
         { type: 'line', data: wave2, symbol: 'none', smooth: true,
           lineStyle: { width: 1, color: '#8b93a7', type: 'dashed' } }
       ]
@@ -1566,7 +1566,7 @@
           /* 阳线（红）实心；阴线（绿）实心 —— 对齐同花顺 */
           itemStyle: { color: C.up, color0: C.down,
                        borderColor: C.up, borderColor0: C.down,
-                       borderWidth: 0.6 },
+                       borderWidth: 1 },
           markLine: (dashLines.length || markData.length) ? {
             symbol: 'none', silent: true, clipOverflow: false,
             data: dashLines.concat(markData), animation: false
