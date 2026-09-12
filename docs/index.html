@@ -271,7 +271,7 @@
 .kline-modal {
   position: fixed; inset: 0;
   width: 100vw; height: 100dvh; height: 100vh;  /* 100dvh 避免 iOS Safari URL 栏抖动 */
-  z-index: 9999; background: #131722; color: #d9dee8;
+  z-index: 9999; background: #0d1117; color: #d9dee8;
   display: flex; flex-direction: column; overflow: hidden;
   transform: translateY(100%); transition: transform .28s ease;
   font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
@@ -289,7 +289,7 @@
 .k-status {
   display: flex; align-items: center; justify-content: space-between;
   padding: 3px 14px 2px; font-size: 12px; font-weight: 600;
-  background: #131722; color: #fff; flex-shrink: 0;
+  background: #0d1117; color: #fff; flex-shrink: 0;
   padding-top: max(3px, env(safe-area-inset-top));
 }
 .k-status .l, .k-status .r { display: flex; align-items: center; gap: 5px; }
@@ -366,8 +366,8 @@
 .k-grid .g { display: inline-flex; align-items: baseline; gap: 3px; white-space: nowrap; }
 .k-grid .g .l { color: #6b7488; font-size: 10px; }
 .k-grid .g .v { color: #d9dee8; font-weight: 600; font-size: 11.5px; }
-.k-grid .g .v.up { color: #ef4a4a; }
-.k-grid .g .v.down { color: #1bb55b; }
+.k-grid .g .v.up { color: #e83e3e; }
+.k-grid .g .v.down { color: #14b87d; }
 
 /* ====== 异动解读条（薄） ====== */
 .k-news {
@@ -387,7 +387,7 @@
   white-space: nowrap;
 }
 .k-news .txt { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #c0c5d1; }
-.k-news .dot { width: 5px; height: 5px; background: #ef4444; border-radius: 50%; flex-shrink: 0; }
+.k-news .dot { width: 5px; height: 5px; background: #e83e3e; border-radius: 50%; flex-shrink: 0; }
 .k-news .close { color: #6b7488; cursor: pointer; font-size: 13px; line-height: 1; padding: 0 2px; flex-shrink: 0; }
 
 /* ====== 盘后固定交易价格行（薄） ====== */
@@ -396,8 +396,8 @@
   display: flex; align-items: center; gap: 5px; flex-shrink: 0;
 }
 .k-postfix .lbl { color: #c0c5d1; font-weight: 500; }
-.k-postfix .px { font-weight: 700; color: #ef4a4a; }
-.k-postfix .px.down { color: #1bb55b; }
+.k-postfix .px { font-weight: 700; color: #e83e3e; }
+.k-postfix .px.down { color: #14b87d; }
 .k-postfix .muted { color: #8b93a7; }
 .k-postfix .ar { color: #6b7488; margin-left: auto; font-size: 8.5px; }
 
@@ -414,7 +414,7 @@
   border-bottom: 2px solid transparent; white-space: nowrap;
 }
 .k-tabs .seg div.on {
-  color: #ef4a4a; border-bottom-color: #ef4a4a; font-weight: 600;
+  color: #e83e3e; border-bottom-color: #e83e3e; font-weight: 600;
 }
 .k-tabs .hex { margin-left: auto; color: #6b7488; font-size: 12px; cursor: pointer; }
 
@@ -456,7 +456,7 @@
 /* ====== 波段雷达面板（4段，参考同花顺） ====== */
 .k-wave-wrap {
   height: 72px; flex-shrink: 0; border-top: 1px solid #1f2533;
-  background: #131722; position: relative; width: 100%;
+  background: #0d1117; position: relative; width: 100%;
 }
 .k-wave-hdr {
   position: absolute; left: 0; right: 0; top: 0; height: 16px;
@@ -522,13 +522,13 @@
 .k-click-info .since { color: #c0c5d1; font-size: 10.5px; margin-top: 1px; }
 .k-click-info .since .v { font-size: 13.5px; font-weight: 800; margin-left: 4px; }
 .k-click-info .since .v.up   { color: #ff6a5a; }
-.k-click-info .since .v.down { color: #2ddb85; }
+.k-click-info .since .v.down { color: #14b87d; }
 .k-click-info .day { color: #c0c5d1; font-size: 10.5px; }
 .k-click-info .day .v { font-weight: 600; margin-left: 4px; }
 .k-click-info .sep { color: #4b5563; margin: 0 4px; }
 .k-click-info .lbl { color: #8b93a7; font-size: 9.5px; margin-right: 2px; }
 .k-click-info .v.up { color: #ff6a5a; font-weight: 600; }
-.k-click-info .v.down { color: #2ddb85; font-weight: 600; }
+.k-click-info .v.down { color: #14b87d; font-weight: 600; }
 .k-click-info .v.flat { color: #c0c5d1; font-weight: 600; }
 .k-click-info .hint { color: #6b7488; font-size: 9px; margin-top: 3px; display:block; }
 
@@ -546,19 +546,19 @@
 .k-subhdr#kAmtHdr { top: calc(69% + 0.4%); }
 .k-subhdr .lbl {
   display: inline-flex; align-items: center; gap: 3px;
-  background: #ef4a4a; color: #fff; font-size: 9.5px;
+  background: #e83e3e; color: #fff; font-size: 9.5px;
   padding: 0 5px; border-radius: 2px; font-weight: 600; flex-shrink: 0;
 }
 .k-subhdr .lbl .ar { font-size: 7.5px; }
 .k-subhdr .val { color: #d9dee8; font-weight: 600; }
 .k-subhdr .ma { display: inline-flex; align-items: center; gap: 2px; }
 .k-subhdr .ma .ma-dot { display: inline-block; width: 6px; height: 2px; border-radius: 1px; }
-.k-subhdr .ma5 .ma-dot { background: #ff90a0; }
-.k-subhdr .ma10 .ma-dot { background: #9b6dff; }
+.k-subhdr .ma5 .ma-dot { background: #ffffff; }
+.k-subhdr .ma10 .ma-dot { background: #f5b942; }
 
 /* ====== 配色 ====== */
-.up { color: #ef4a4a; }   /* A 股：红涨 */
-.down { color: #1bb55b; } /* A 股：绿跌 */
+.up { color: #e83e3e; }   /* A 股：红涨 */
+.down { color: #14b87d; } /* A 股：绿跌 */
 .flat { color: #c0c5d1; }
 
 /* 桌面端：模拟 iPhone 竖屏比例（居中手机框，占满屏高，K 线高瘦贴近同花顺截图） */
@@ -706,8 +706,8 @@
 (function(){
   var chart = null, waveChart = null;
   var state = { code: null, mode: 'day70', marks: [], codeList: [] };
-  var C = { up: '#ff4438', down: '#16c784', flat: '#c0c5d1',
-            ma5: '#ef4a4a', ma10: '#f5b942', ma20: '#5cc8ff', ma30: '#9b6dff' };
+  var C = { up: '#e83e3e', down: '#14b87d', flat: '#c0c5d1',
+            ma5: '#ffffff', ma10: '#f5b942', ma20: '#9b6dff', ma30: '#5cc8ff' };
 
   function $(id) { return document.getElementById(id); }
   function fmt(v, d) { d = d || 2; return (v === null || v === undefined || isNaN(v)) ? '—' : v.toFixed(d); }
@@ -1501,7 +1501,7 @@
       textStyle: { color: '#d9dee8', fontSize: 11 },
       tooltip: {
         trigger: 'axis', axisPointer: { type: 'cross', link: [{xAxisIndex: 'all'}] },
-        backgroundColor: 'rgba(20,25,40,.95)', borderColor: '#2a3247',
+        backgroundColor: 'rgba(13,17,23,.96)', borderColor: '#2a3247',
         textStyle: { color: '#e6e9f0', fontSize: 11 },
         formatter: function(params){
           var i = params[0].dataIndex;
@@ -1726,7 +1726,7 @@
       textStyle: { color: '#d9dee8', fontSize: 11 },
       tooltip: {
         trigger: 'axis', axisPointer: { type: 'cross', link: [{xAxisIndex: 'all'}] },
-        backgroundColor: 'rgba(20,25,40,.95)', borderColor: '#2a3247',
+        backgroundColor: 'rgba(13,17,23,.96)', borderColor: '#2a3247',
         textStyle: { color: '#e6e9f0', fontSize: 11 },
         formatter: function(params){
           var i = params[0].dataIndex;
