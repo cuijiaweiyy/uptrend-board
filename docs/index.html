@@ -1564,9 +1564,10 @@
         { name: 'K线', type: 'candlestick', data: d.ohlc,
           barMaxWidth: 5.5, barMinWidth: 2,
           /* 阳线（红）实心；阴线（绿）实心 —— 对齐同花顺 */
-          itemStyle: { color: C.up, color0: C.down,
+          /* 阳线空心（透明+红边），阴线实心 —— 与同花顺一致 */
+          itemStyle: { color: 'transparent', color0: C.down,
                        borderColor: C.up, borderColor0: C.down,
-                       borderWidth: 1 },
+                       borderWidth: 0.6 },
           markLine: (dashLines.length || markData.length) ? {
             symbol: 'none', silent: true, clipOverflow: false,
             data: dashLines.concat(markData), animation: false
