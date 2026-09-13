@@ -2495,32 +2495,52 @@ applyStrat(curStrat);  // 首屏用嵌入数据渲染，fetch 覆盖为双策略
     'pointer-events:none;transition:opacity .3s,background .3s;max-width:70vw';
   document.body.appendChild(el);
   function set(txt, bg){ if(!el) return; el.textContent = txt; if(bg) el.style.background = bg; el.style.opacity = '1'; }
-  function apply(d){
+  function apply(d, isSnap){
     applyCombined(d);
     var _b = BOARDS[curStrat] || {};
     var t = String(_b.generated_at || '').slice(11, 16);
-    set('实时 · ' + (t || '刚刚') + ' · ' + (_b.pool ? _b.pool.total : '?') + ' 只', 'rgba(0,140,70,.92)');
+    var n = _b.pool ? _b.pool.total : '?';
+    if (isSnap) {
+      // 快照别写成"实时"，否则用户会以为这是当下名单
+      set('快照 · ' + (t || '—') + ' · ' + n + ' 只 · 正在刷新…', 'rgba(0,0,0,.6)');
+    } else {
+      set('实时 · ' + (t || '刚刚') + ' · ' + n + ' 只', 'rgba(0,140,70,.92)');
+    }
     setTimeout(function(){ if (el && el.style) el.style.opacity = '0.35'; }, 4000);
   }
 
   set('正在获取最新名单…', 'rgba(0,0,0,.55)');
   var slow = setTimeout(function(){ set('加载较慢，先显示最近快照', 'rgba(180,120,0,.9)'); }, 8000);
 
-  // 1) 先秒显 GitHub 上的最近快照（一定可达，保证有画面）
-  //    加时间戳击穿 GitHub Pages CDN 缓存：每次打开都取到最新 board.json
-  var SRC_Q = SRC + (SRC.indexOf('?') >= 0 ? '&' : '?') + '_=' + Date.now();
-  fetch(SRC_Q, { cache: 'no-store' })
-    .then(function(r){ if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
-    .then(function(d){
-      if (!d || (!d.strategies && (!d.boards || !d.pool))) throw new Error('数据格式异常');
+  // 1) 先取「最近快照」把画面铺上（多候选依次回退）。
+  //    坑：Cloudflare Pages 对未匹配路径会回落到 index.html，返回 200 + text/html，
+  //    只判断 r.ok 就会把 HTML 当 JSON 解析而失败 —— 必须 text() + JSON.parse + 结构校验。
+  var snapOK = false, freshest = false, refreshDone = false;
+  var cands = [SRC, '/api/board',
+               'https://cuijiaweiyy.github.io/uptrend-board/board.json',
+               PAGES_API + '/api/board'].filter(function (u, i, a) { return u && a.indexOf(u) === i; });
+  function isBoard(d) { return !!d && typeof d === 'object' && (d.strategies || (d.boards && d.pool)); }
+  function trySnap(i) {
+    if (i >= cands.length) {
       clearTimeout(slow);
-      apply(d);
-    })
-    .catch(function(e){
-      clearTimeout(slow);
-      set('实时失败，显示 ' + (DATA && DATA.date || '') + ' 快照', 'rgba(170,40,40,.92)');
-      setTimeout(function(){ if (el && el.style) el.style.opacity = '0.4'; }, 3000);
-    });
+      // 快照全失败先别报红：第 2 步的实时刷新可能马上就成功。
+      // 若实时刷新已经给出结论，就不要再用这条中性文案覆盖它。
+      if (!freshest && !refreshDone) { set('正在刷新为当下最新…', 'rgba(0,0,0,.6)'); }
+      return Promise.resolve(false);
+    }
+    var u = cands[i] + (cands[i].indexOf('?') >= 0 ? '&' : '?') + '_=' + Date.now();
+    return fetch(u, { cache: 'no-store' })
+      .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); })
+      .then(function (txt) { var d = JSON.parse(txt); if (!isBoard(d)) throw new Error('格式异常'); return d; })
+      .then(function (d) {
+        clearTimeout(slow);
+        snapOK = true;
+        if (!freshest) { apply(d, true); }   // 已有更新的实时数据就不要用旧快照回退覆盖
+        return true;
+      })
+      .catch(function () { return trySnap(i + 1); });
+  }
+  trySnap(0);
 
   // 2) 打开即算：若 Pages 端点可达，触发一次当下计算并刷新为最新
   function tryPagesRefresh(){
@@ -2533,22 +2553,26 @@ applyStrat(curStrat);  // 首屏用嵌入数据渲染，fetch 覆盖为双策略
       .then(function(reachable){
         if (!reachable) return null;
         set('正在刷新为当下最新…', 'rgba(0,0,0,.6)');
-        // 计算约 10-25s，给足 40s；失败/超时则保留快照
+        // 服务端抓取预算 25s，移动网络下更慢；给足 60s，失败/超时则保留快照
         var c2 = new AbortController();
-        var t2 = setTimeout(function(){ c2.abort(); }, 40000);
+        var t2 = setTimeout(function(){ c2.abort(); }, 60000);
         return fetch(PAGES_API + '/api/board?refresh=1', { signal: c2.signal, cache: 'no-store' })
-          .then(function(r){ clearTimeout(t2); if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
-          .then(function(d){ if (!d || (!d.strategies && (!d.boards || !d.pool))) throw new Error('bad'); return d; })
+          .then(function(r){ if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); })
+          .then(function(txt){ var d = JSON.parse(txt); if (!isBoard(d)) throw new Error('bad'); return d; })
           .catch(function(){ clearTimeout(t2); return null; });
       });
   }
   tryPagesRefresh().then(function(fresh){
+    refreshDone = true;   // 之后任何迟到的快照回退都不再改写最终文案
     if (fresh) {
-      apply(fresh);
+      freshest = true;
+      apply(fresh, false);
       var _b = BOARDS[curStrat] || {};
       set('已刷新为当下最新 · ' + (_b.pool ? _b.pool.total : '?') + ' 只', 'rgba(0,140,70,.95)');
     } else {
-      set('已显示最近快照（实时端点不可达，定时每15分钟更新）', 'rgba(0,0,0,.55)');
+      set(snapOK ? '已显示最近快照（实时端点暂不可达，定时每15分钟更新）'
+                 : '实时暂不可达，显示 ' + (DATA && DATA.date || '') + ' 快照',
+          snapOK ? 'rgba(0,0,0,.55)' : 'rgba(170,40,40,.92)');
     }
   });
 })();
