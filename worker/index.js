@@ -405,13 +405,24 @@ async function readBoardKv(env) {
   }
 }
 
+// 「完整榜」判定：两个策略都必须有且带 pool。
+// 血的教训：buildCombined 在预算耗尽时会 break，若用 Object.values().every() 判完整，
+// 只抓到 ma 一个策略也会被判成 complete，于是半成品被写进 KV 并推上 GitHub。
+export function isCompleteBoard(data) {
+  const s = (data && data.strategies) || {};
+  return ['uptrend', 'ma'].every((k) => s[k] && s[k].pool);
+}
+
 export async function writeBoardKv(env, data) {
   const kv = env.UPTREND_KV;
-  if (!kv) return;
+  if (!kv) return { skipped: 'no kv' };
+  if (!isCompleteBoard(data)) return { skipped: 'incomplete（拒绝用半成品覆盖 KV）' };
   try {
     await kv.put(BOARD_KEY, JSON.stringify({ ts: Date.now(), data }));
+    return { ok: true };
   } catch {
     /* KV 不可用时退化为 Cache API，忽略 */
+    return { skipped: 'kv error' };
   }
 }
 
@@ -536,7 +547,10 @@ export async function buildCombined(env, deadline = 0) {
   const strategies = {};
   const order = ['ma', 'uptrend'];
   for (const key of order) {
-    if (deadline && Date.now() > deadline) break;
+    if (deadline && Date.now() > deadline) {
+      strategies[key] = null;   // 超预算：占位为 null（不能只是 break，否则该键不存在）
+      continue;
+    }
     const poolRes = await fetchPool(token, key, 3, minGap, deadline);
     if (!poolRes.stocks.length) {
       strategies[key] = null; // 单段失败：记录但不致命，继续抓另一段
@@ -544,7 +558,9 @@ export async function buildCombined(env, deadline = 0) {
     }
     strategies[key] = await computeBoardFromStocks(poolRes.stocks, poolRes.tradeDate, env, poolRes.failed, key);
   }
-  const complete = Object.values(strategies).every((s) => s);
+  // 必须「两个策略都拿到」才算完整。用 order.every 而不是 Object.values().every()，
+  // 否则只抓到其中一个策略时会被误判为完整，进而把半成品写进 KV / 推上 GitHub。
+  const complete = order.every((k) => !!strategies[k]);
   const updated_at = new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 19).replace('T', ' ');
   return { updated_at, strategies, complete };
 }
@@ -597,6 +613,8 @@ async function ghApi(env, method, path, body) {
 export async function pushBoardToGithub(env, data) {
   const token = env.GH_TOKEN;
   if (!token) return { skipped: 'no GH_TOKEN' };
+  // 双保险：只允许完整榜覆盖远端，避免半成品（例如只抓到 ma）把 board.json 写残
+  if (!isCompleteBoard(data)) return { skipped: 'incomplete（拒绝推送半成品）' };
   const repo = env.GH_REPO || 'cuijiaweiyy/uptrend-board';
   const path = (env.GH_PATH || 'docs/board.json').replace(/^\/+/, '');
   const branch = env.GH_BRANCH || 'main';

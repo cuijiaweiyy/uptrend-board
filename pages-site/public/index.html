@@ -2516,9 +2516,14 @@ applyStrat(curStrat);  // 首屏用嵌入数据渲染，fetch 覆盖为双策略
   //    坑：Cloudflare Pages 对未匹配路径会回落到 index.html，返回 200 + text/html，
   //    只判断 r.ok 就会把 HTML 当 JSON 解析而失败 —— 必须 text() + JSON.parse + 结构校验。
   var snapOK = false, freshest = false, refreshDone = false;
-  var cands = [SRC, '/api/board',
-               'https://cuijiaweiyy.github.io/uptrend-board/board.json',
-               PAGES_API + '/api/board'].filter(function (u, i, a) { return u && a.indexOf(u) === i; });
+  // 站在 pages.dev 上时，同源 /api/board 才是正路；先去取 board.json 会白下载一份
+  // 460KB 的 HTML 回落（Pages 对未匹配路径回落 index.html），手机上很浪费流量。
+  var onPagesDev = String((window.location && window.location.hostname) || '').indexOf('pages.dev') >= 0;
+  var firstTwo = onPagesDev ? ['/api/board', SRC] : [SRC, '/api/board'];
+  var cands = firstTwo.concat([
+    'https://cuijiaweiyy.github.io/uptrend-board/board.json',
+    PAGES_API + '/api/board',
+  ]).filter(function (u, i, a) { return u && a.indexOf(u) === i; });
   function isBoard(d) { return !!d && typeof d === 'object' && (d.strategies || (d.boards && d.pool)); }
   function trySnap(i) {
     if (i >= cands.length) {
