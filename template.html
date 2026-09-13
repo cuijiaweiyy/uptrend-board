@@ -539,8 +539,9 @@
 .k-click-info .since .v { font-size: 13.5px; font-weight: 800; margin-left: 4px; }
 .k-click-info .since .v.up   { color: #ff6a5a; }
 .k-click-info .since .v.down { color: #14b87d; }
+.k-click-info .since .per { color: #8b93a7; font-size: 10.5px; font-weight: 600; margin-left: 6px; }
 .k-click-info .day { color: #c0c5d1; font-size: 10.5px; }
-.k-click-info .day .v { font-weight: 600; margin-left: 4px; }
+.k-click-info .day .v { font-weight: 800; font-size: 15px; margin-left: 5px; }
 .k-click-info .sep { color: #4b5563; margin: 0 4px; }
 .k-click-info .lbl { color: #8b93a7; font-size: 9.5px; margin-right: 2px; }
 .k-click-info .v.up { color: #ff6a5a; font-weight: 600; }
@@ -699,8 +700,8 @@
     <div class="k-click-info" id="kClickInfo">
       <span class="d" id="kClickDate">—</span>
       <div class="day"><span class="lbl">当日</span><span class="v" id="kClickDay">—</span></div>
-      <div class="since"><span class="lbl">至今</span><span class="v" id="kClickSince">—</span></div>
-      <span class="hint">点击 K 线查看至今累计涨幅</span>
+      <div class="since"><span class="lbl">至今</span><span class="v" id="kClickSince">—</span><span class="per" id="kClickPeriod"></span></div>
+      <span class="hint">光标移到 K 线上查看</span>
     </div>
     <div class="k-loading" id="klineLoading">加载中…</div>
   </div>
@@ -1047,32 +1048,46 @@
     });
   }
 
-  /* ============ 点击 K 线 · 左上角信息卡 ============ */
+  /* ============ 光标悬停 K 线 · 左上角信息卡（当日涨跌幅 / 至今涨幅 + 周期） ============ */
   var dLastDates = [], dLastOhlc = [], dLastLen = 0;
+  var _lastInfoIdx = -1;   /* 同一根 K 线不重复刷 DOM（mousemove 高频触发） */
   function showClickInfo(i) {
     var el = $('kClickInfo'); if (!el) return;
     if (i < 0 || i >= dLastLen) { el.style.display = 'none'; return; }
+    if (i === _lastInfoIdx && el.style.display !== 'none') return;
     var dates = dLastDates, ohlc = dLastOhlc, n = ohlc.length;
     var o = ohlc[i];
     var open = o[0], close = o[1];
     if (open === null || open === undefined || open === 0) { el.style.display = 'none'; return; }
-    var dayChg = close - open;
-    var dayPct = dayChg / open * 100;
+    /* 当日涨跌：相对「前一交易日收盘」，与同花顺涨跌幅口径一致（i=0 回退到当日开盘） */
+    var prevClose = (i > 0 && ohlc[i - 1] && ohlc[i - 1][1]) ? ohlc[i - 1][1] : open;
+    if (!prevClose) prevClose = open;
+    var dayChg = close - prevClose;
+    var dayPct = prevClose ? dayChg / prevClose * 100 : 0;
+    /* 至今：该日收盘 → 最新日收盘 */
     var lastClose = ohlc[n - 1][1];
-    /* 至今 = 现在close - 点击日open（含点击当日的跳空+日内波动） */
-    var sinceChg = lastClose - open;
-    var sincePct = sinceChg / open * 100;
+    var sinceChg = lastClose - close;
+    var sincePct = close ? sinceChg / close * 100 : 0;
+    var period = (n - 1) - i;   /* 至今经过的交易日数（周期） */
     function cls(v){ return v > 0 ? 'up' : (v < 0 ? 'down' : 'flat'); }
-    function sv(v){ return (v >= 0 ? '+' : '') + v.toFixed(2); }
-    function pv(v){ return (v >= 0 ? '+' : '') + v.toFixed(2) + '%'; }
+    /* 0 不带正号（同花顺口径） */
+    function sv(v){ return (v > 0 ? '+' : '') + v.toFixed(2); }
+    function pv(v){ return (v > 0 ? '+' : '') + v.toFixed(2) + '%'; }
     $('kClickDate').textContent = dates[i] || ('idx ' + i);
     $('kClickDay').className   = 'v ' + cls(dayChg);
-    $('kClickDay').textContent = sv(dayChg) + ' (' + pv(dayPct) + ')';
+    $('kClickDay').textContent = pv(dayPct) + ' (' + sv(dayChg) + ')';
     $('kClickSince').className = 'v ' + cls(sinceChg);
-    $('kClickSince').textContent = sv(sinceChg) + ' (' + pv(sincePct) + ')';
+    $('kClickSince').textContent = pv(sincePct) + ' (' + sv(sinceChg) + ')';
+    var perEl = $('kClickPeriod');
+    if (perEl) perEl.textContent = period > 0 ? (period + ' 周期') : '';
     el.style.display = '';
+    _lastInfoIdx = i;
   }
-  function hideClickInfo() { var el = $('kClickInfo'); if (el) el.style.display = 'none'; }
+  function hideClickInfo() {
+    var el = $('kClickInfo');
+    if (el) el.style.display = 'none';
+    _lastInfoIdx = -1;
+  }
 
   /* ============ 加载入口 ============ */
   function setLoading(txt, isErr) {
@@ -1596,7 +1611,11 @@
             var isUp = close >= open;
             var bodyFill = isUp ? 'transparent' : C.down;
             var lineColor = isUp ? C.up : C.down;
-            var halfW = 2.75;  /* barMaxWidth/2 */
+            /* 柱宽随缩放自适应：取格宽的 64%（原为固定 5.5px，会与相邻柱几乎贴合），
+               夹在 [1px, 4px] 半径内。缩放时自动变宽变窄，与同花顺观感一致。 */
+            var cellW = 6;
+            try { var _sz = api.size([1, 0]); if (_sz && _sz[0] > 0) cellW = _sz[0]; } catch (e) {}
+            var halfW = Math.max(1, Math.min(cellW * 0.32, 4));
             var items = [];
             /* 上影线：实体顶 → high（仅实体上方） */
             if (high > Math.max(open, close)) {
@@ -1641,7 +1660,7 @@
           lineStyle: { width: 1, color: C.ma30 }, animation: false },
 
         { name: '量', type: 'bar', xAxisIndex: 1, yAxisIndex: 1, data: vol,
-          barMaxWidth: 6, barMinWidth: 2,
+          barCategoryGap: '36%', barMaxWidth: 5, barMinWidth: 1,
           itemStyle: { color: function(p){
             var i = p.dataIndex, o = d.ohlc[i];
             return (o[1] >= o[0]) ? 'rgba(255,68,56,.95)' : 'rgba(22,199,132,.95)';
@@ -1654,7 +1673,7 @@
           lineStyle: { width: 1, color: C.ma10 }, animation: false },
 
         { name: '额', type: 'bar', xAxisIndex: 2, yAxisIndex: 2, data: amt,
-          barMaxWidth: 6, barMinWidth: 2,
+          barCategoryGap: '36%', barMaxWidth: 5, barMinWidth: 1,
           itemStyle: { color: function(p){
             var i = p.dataIndex, o = d.ohlc[i];
             return (o[1] >= o[0]) ? 'rgba(255,68,56,.95)' : 'rgba(22,199,132,.95)';
@@ -1715,8 +1734,18 @@
       if (waveChart) waveChart.resize();
     }, 50);
 
-    /* === 点击 K 线 → 左上角信息卡 + 主图黄色高亮竖线 === */
+    /* === 光标移到 K 线上 → 左上角信息卡（跟随十字光标）；点击 → 追加黄色高亮竖线 === */
+    try { chart && chart.off && chart.off('updateAxisPointer'); } catch(e){}
+    try { chart && chart.off && chart.off('globalout'); } catch(e){}
     try { chart && chart.off && chart.off('click'); } catch(e){}
+    chart.on('updateAxisPointer', function(ev){
+      var ix = null;
+      if (ev && typeof ev.dataIndex === 'number' && ev.dataIndex >= 0) ix = ev.dataIndex;
+      else if (ev && ev.axesInfo && ev.axesInfo.length) ix = ev.axesInfo[0].value;
+      if (ix === null || ix === undefined || isNaN(ix)) return;
+      showClickInfo(Number(ix));
+    });
+    chart.on('globalout', function(){ hideClickInfo(); });
     chart.on('click', function(p){
       if (p && p.componentType === 'series' && p.seriesType === 'candlestick') {
         showClickInfo(p.dataIndex);
