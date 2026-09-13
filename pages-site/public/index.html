@@ -743,6 +743,20 @@
     if (v >= 1e4)  return (v/1e4).toFixed(1) + '万';
     return String(Math.round(v));
   }
+  /* 弹窗头部数值格式化：非数字一律显示「—」。
+     注意 isNaN(null) === false，必须先判 null，否则 null 会显示成 0.00。 */
+  function fmtNum(v, d, suf) {
+    if (v === null || v === undefined || v === '' || isNaN(v)) return '—';
+    return Number(v).toFixed(d === undefined ? 2 : d) + (suf || '');
+  }
+  /* 市值 / 流通市值：入参单位是「亿」；不足 1 亿改用「万」 */
+  function fmtYi(v) {
+    if (v === null || v === undefined || v === '' || isNaN(v)) return '—';
+    v = Number(v);
+    if (v >= 1)    return v.toFixed(2) + '亿';
+    if (v >= 1e-4) return (v * 1e4).toFixed(0) + '万';
+    return '—';
+  }
 
   /* ============ iOS 状态栏时钟 ============ */
   function tickClock() {
@@ -883,7 +897,8 @@
     var low  = d.daily_low  || last.low;
     var open = d.daily_open || last.open;
     var vol  = d.daily_vol  || last.vol;
-    var amt  = d.daily_amt  || (vol ? (vol * ((open + high + low + last.close) / 4) / 100) : 0);
+    /* 成交量单位是「手」：元 = 手 × 100 股 × 均价（原式少乘 100，误差 1e4 倍） */
+    var amt  = d.daily_amt  || (vol ? (vol * 100 * ((open + high + low + last.close) / 4)) : 0);
 
     /* 颜色规则（对齐同花顺）：
        高 = 当日方向（红涨/绿跌），低 = 反向，
@@ -898,14 +913,13 @@
     /* 3 列 × 3 行：列1 高/低/开 | 列2 市值/流通/市盈TTM | 列3 量比/换/额 */
     var html = '';
     html += cell('高',   fmt(high),                                   dayUp  ? 'up'   : 'down');
-    html += cell('市值', d.mv   ? d.mv.toFixed(2) + '亿' : '—');
-    html += cell('量比', d.lb   ? d.lb.toFixed(2)        : '—',        lbUp   ? 'up'   : '');
+    html += cell('市值', fmtYi(d.mv));
+    html += cell('量比', fmtNum(d.lb, 2),                         lbUp   ? 'up'   : '');
     html += cell('低',   fmt(low),                                    dayUp  ? 'down' : 'up');
-    html += cell('流通', d.cmv  ? d.cmv.toFixed(2) + '亿': '—');
-    html += cell('换',   d.hs   ? d.hs.toFixed(2) + '%'  : '—');
+    html += cell('流通', fmtYi(d.cmv));
+    html += cell('换',   fmtNum(d.hs, 2, '%'));
     html += cell('开',   fmt(open),                                   openUp ? 'up'   : 'down');
-    html += cell('市盈<sup style="font-size:8px">TTM</sup>',
-                 d.pe_ttm ? d.pe_ttm.toFixed(2)         : '—');
+    html += cell('市盈<sup style="font-size:8px">TTM</sup>', fmtNum(d.pe_ttm, 2));
     html += cell('额',   fmtAmt(amt));
     $('kGrid').innerHTML = html;
 
@@ -1302,21 +1316,29 @@
     });
   }
 
-  /* 东财单股详细行情（市值/流通/换手/量比/市盈TTM/成交额），用于补齐 K 线弹窗头部 */
+  /* 东财单股详细行情（市值/流通/换手/量比/市盈TTM/成交额），用于补齐 K 线弹窗头部。
+     字段体系差异（已实测）：stock/get 是「单股详情」接口，编号与 ulist/clist
+     「列表」接口不同 —— 这里 f116=总市值 f117=流通市值 f168=换手率 f50=量比
+     f164=市盈TTM f167=市净率 f48=成交额 f57=代码；而 f2/f3/f6/f8/f9/f10/f20/f21/f12
+     属列表接口，本接口一律不返回 —— 曾因此导致整块补全从未生效。
+     另：必须带 fltt=2，否则所有数值均放大 100 倍（f43 返回 926 而非 9.26）。 */
   function emQuoteDirect(code) {
     var secid = emSecid(code);
     var url = 'https://push2.eastmoney.com/api/qt/stock/get?secid=' + secid +
-              '&fields=f2,f3,f4,f5,f6,f8,f9,f10,f20,f21,f43,f45,f48,f57,f58&invt=2';
+              '&fields=f43,f47,f48,f50,f57,f58,f116,f117,f164,f167,f168,f170&invt=2&fltt=2';
     return fetchTxJson(url).then(function(j){
       var d = (j && j.data) || {};
-      if (!d || !d.f12) return null;
+      if (!d || !d.f57) return null;          // 代码字段是 f57（不是 f12）
+      function num(v){ return (typeof v === 'number' && isFinite(v)) ? v : null; }
+      var mv = num(d.f116), cmv = num(d.f117);
       return {
-        mv: d.f20 ? d.f20 / 1e8 : null,        // 总市值(亿)
-        cmv: d.f21 ? d.f21 / 1e8 : null,       // 流通市值(亿)
-        hs: d.f8 ? d.f8 : (d.f43 ? d.f43 : null),   // 换手率%
-        lb: d.f10 ? d.f10 : (d.f45 ? d.f45 : null), // 量比
-        pe_ttm: d.f48 ? d.f48 : null,          // 市盈TTM
-        daily_amt: d.f6 ? d.f6 : null          // 成交额(元)
+        mv: mv === null ? null : mv / 1e8,      // 总市值(亿)
+        cmv: cmv === null ? null : cmv / 1e8,   // 流通市值(亿)
+        hs: num(d.f168),                        // 换手率%
+        lb: num(d.f50),                         // 量比
+        pe_ttm: num(d.f164),                    // 市盈率TTM
+        pb: num(d.f167),                        // 市净率
+        daily_amt: num(d.f48)                   // 成交额(元)
       };
     });
   }
