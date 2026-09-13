@@ -1065,6 +1065,7 @@
   }
 
   /* ============ 光标悬停 K 线 · 左上角信息卡（当日涨跌幅 / 至今涨幅 + 周期） ============ */
+  /* 口径（对齐同花顺）：当日 = 相对前收；至今 = 相对「光标当日的前收」，周期含光标当日 */
   var dLastDates = [], dLastOhlc = [], dLastLen = 0;
   var _lastInfoIdx = -1;   /* 同一根 K 线不重复刷 DOM（mousemove 高频触发） */
   /* 保险：信息卡不存在就现建一个。
@@ -1100,11 +1101,14 @@
     if (!prevClose) prevClose = open;
     var dayChg = close - prevClose;
     var dayPct = prevClose ? dayChg / prevClose * 100 : 0;
-    /* 至今：该日收盘 → 最新日收盘 */
+    /* 至今：同花顺口径 —— 基准取「当日的前收」，把当日自身的涨跌也算进去。
+       反推实测（601890 光标停在 2026-08-14）：前收 8.59 → 末收 10.25 = +19.32%，
+       若改用当日收盘 9.18 作基准只得到 +11.66%，与同花顺截图不符。
+       周期同样「含当日」：08/14 → 09/11 共 21 根，同花顺显示 21 周期。 */
     var lastClose = ohlc[n - 1][1];
-    var sinceChg = lastClose - close;
-    var sincePct = close ? sinceChg / close * 100 : 0;
-    var period = (n - 1) - i;   /* 至今经过的交易日数（周期） */
+    var sinceChg = lastClose - prevClose;
+    var sincePct = prevClose ? sinceChg / prevClose * 100 : 0;
+    var period = n - i;   /* 至今的 K 线根数（含光标当日） */
     function cls(v){ return v > 0 ? 'up' : (v < 0 ? 'down' : 'flat'); }
     /* 0 不带正号（同花顺口径） */
     function sv(v){ return (v > 0 ? '+' : '') + v.toFixed(2); }
