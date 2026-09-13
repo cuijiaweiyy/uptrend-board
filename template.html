@@ -1747,7 +1747,10 @@
     });
     chart.on('globalout', function(){ hideClickInfo(); });
     chart.on('click', function(p){
-      if (p && p.componentType === 'series' && p.seriesType === 'candlestick') {
+      /* 注意：K 线是 custom series（不是 candlestick），
+         原判断按 seriesType 是否为 candlestick 来筛选，对 custom series 恒为假，
+         导致点击高亮与信息卡从未生效。改为按 dataIndex 判定，手机端点按也能显示。 */
+      if (p && p.componentType === 'series' && typeof p.dataIndex === 'number' && p.dataIndex >= 0) {
         showClickInfo(p.dataIndex);
         var ix = p.dataIndex;
         var extra = dashLines.concat(markData);  // 保留 avg 区间线 + 入选日标记（点击高亮不丢）
