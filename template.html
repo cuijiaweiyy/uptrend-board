@@ -1128,7 +1128,8 @@
         for (var i = 0; i < rows.length; i++) {
           var r = rows[i];
           dates.push(r[0]);
-          ohlc.push([Number(r[1]), Number(r[2]), Number(r[3]), Number(r[4])]);
+          /* 腾讯 fqkline 原始序为 开,收,高,低；统一成项目契约 [开,收,低,高]（见 kline.py） */
+          ohlc.push([Number(r[1]), Number(r[2]), Number(r[4]), Number(r[3])]);
           vols.push(Number(r[5]));
         }
         return {
@@ -1230,7 +1231,8 @@
       for (var i = 0; i < kl.length; i++) {
         var p = String(kl[i]).split(',');
         dates.push(p[0]);
-        ohlc.push([Number(p[1]), Number(p[2]), Number(p[3]), Number(p[4])]); // 开,收,高,低
+        /* 东财 klines 原始序为 开,收,高,低；统一成项目契约 [开,收,低,高]（见 kline.py） */
+        ohlc.push([Number(p[1]), Number(p[2]), Number(p[4]), Number(p[3])]);
         vols.push(Number(p[5]));
       }
       return {

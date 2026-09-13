@@ -1016,11 +1016,16 @@ def js_check(html):
     with open(tmp, "w", encoding="utf-8") as f:
         f.write("\n;\n".join(blocks))
     exe = None
-    for cand in (
-        os.path.join(os.path.dirname(sys.executable), "node.exe"),
-        r"C:\Users\mayn\.workbuddy\binaries\node\versions\22.22.2-2\node.exe",
-        "node",
-    ):
+    # 本机托管 node 的版本目录会变（22.22.2-2 → 22.22.2-3 …），
+    # 写死版本号会导致自检被静默跳过（except 里返回“跳过”），
+    # 而这道 node --check 正是防“括号失配 → 整页图表空白”的闸门，不能失效。
+    cands = [os.path.join(os.path.dirname(sys.executable), "node.exe")]
+    cands += sorted(
+        glob.glob(r"C:\Users\mayn\.workbuddy\binaries\node\versions\*\node.exe"),
+        reverse=True,
+    )
+    cands.append("node")
+    for cand in cands:
         if cand == "node" or os.path.exists(cand):
             exe = cand
             break
