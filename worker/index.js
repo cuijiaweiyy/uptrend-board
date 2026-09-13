@@ -610,11 +610,24 @@ async function ghApi(env, method, path, body) {
   return j;
 }
 
-export async function pushBoardToGithub(env, data) {
+export async function pushBoardToGithub(env, data, options = {}) {
   const token = env.GH_TOKEN;
   if (!token) return { skipped: 'no GH_TOKEN' };
   // 双保险：只允许完整榜覆盖远端，避免半成品（例如只抓到 ma）把 board.json 写残
   if (!isCompleteBoard(data)) return { skipped: 'incomplete（拒绝推送半成品）' };
+
+  // 节流：实时链路（页面打开即算）每次刷新都推 commit 会把 GitHub Pages 的构建队列刷爆，
+  // 表现为 "Page build failed." / 长时间 building，线上页面反而更新不了。
+  // docs/board.json 只是 pages.dev 不可达时的兜底快照，不需要秒级新鲜。
+  const minGapMs = Number(env.PUSH_MIN_GAP_MS || 20 * 60 * 1000);
+  if (!options.force && env.UPTREND_KV) {
+    try {
+      const last = Number(await env.UPTREND_KV.get('push:last')) || 0;
+      if (last && Date.now() - last < minGapMs) {
+        return { skipped: `throttled（距上次推送 ${Math.round((Date.now() - last) / 60000)} 分钟）` };
+      }
+    } catch { /* KV 不可用就不节流 */ }
+  }
   const repo = env.GH_REPO || 'cuijiaweiyy/uptrend-board';
   const path = (env.GH_PATH || 'docs/board.json').replace(/^\/+/, '');
   const branch = env.GH_BRANCH || 'main';
@@ -659,6 +672,9 @@ export async function pushBoardToGithub(env, data) {
     sha: newCommit.sha,
     force: false,
   });
+  try {
+    if (env.UPTREND_KV) await env.UPTREND_KV.put('push:last', String(Date.now()), { expirationTtl: 86400 });
+  } catch { /* 记不上就算了，下轮可能多推一次 */ }
   return { ok: true, sha: newCommit.sha.slice(0, 10) };
 }
 
