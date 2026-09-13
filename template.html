@@ -1000,12 +1000,17 @@
     for (var i = arr.length - m; i < arr.length; i++) s += arr[i] || 0;
     return s / m;
   }
+  /* 成交额序列（元）。优先用东财主源逐根给出的真实成交额；腾讯兜底源没有该字段，才退化成估算。
+     估算公式：成交量单位是「手」→ 元 = 手 × 100 股 × 均价
+     （原式写成 手 × 均价 / 100，少乘 1e4，于是 hover 显示的成交额永远到不了「亿」，只剩「万」）。
+     注意本函数被三处消费：hover tooltip、成交额副标题、成交额副图 —— 口径必须一致。 */
   function amtSeries(d) {
-    var n = d.ohlc.length, out = [];
+    var n = d.ohlc.length, out = [], amts = d.amounts || null;
     for (var i = 0; i < n; i++) {
+      if (amts && amts[i] > 0) { out.push(amts[i]); continue; }
       var o = d.ohlc[i];
       var avg = (o[0] + o[1] + o[2] + o[3]) / 4;
-      out.push((d.volumes[i] || 0) * avg / 100);
+      out.push((d.volumes[i] || 0) * 100 * avg);
     }
     return out;
   }
@@ -1289,25 +1294,31 @@
       var dd = (j && j.data) || {};
       var kl = dd.klines || [];
       if (!kl.length) throw new Error('无数据');
-      var dates = [], ohlc = [], vols = [];
+      var dates = [], ohlc = [], vols = [], amts = [];
       for (var i = 0; i < kl.length; i++) {
         var p = String(kl[i]).split(',');
         dates.push(p[0]);
         /* 东财 klines 原始序为 开,收,高,低；统一成项目契约 [开,收,低,高]（见 kline.py） */
         ohlc.push([Number(p[1]), Number(p[2]), Number(p[4]), Number(p[3])]);
         vols.push(Number(p[5]));
+        /* p[6] = f57 = 成交额(元)。与右上角「额」同源同量纲，逐根都拿得到（腾讯源没有这个字段）。
+           实测核实（2026-09-13，klt=103 月线）：2026-08-31 量 5613971 手 / 额 49.29 亿，
+           隐含均价 8.78 元落在 8 月区间 8.37~9.45 内；2026-09-11 同理（均价 9.76 元）。 */
+        amts.push(Number(p[6]) || 0);
       }
       return {
         ok: true,
         data: {
           code: code, name: dd.name || code, period: period, days: days,
-          dates: dates, ohlc: ohlc, volumes: vols,
+          dates: dates, ohlc: ohlc, volumes: vols, amounts: amts,
         last: { close: ohlc[ohlc.length-1][1], open: ohlc[ohlc.length-1][0],
                 high: ohlc[ohlc.length-1][3], low: ohlc[ohlc.length-1][2],
                 vol: vols[ohlc.length-1] },
         prev_close: ohlc.length > 1 ? ohlc[ohlc.length-2][1] : ohlc[ohlc.length-1][0],
         daily_open: ohlc[ohlc.length-1][0], daily_high: ohlc[ohlc.length-1][3],
         daily_low: ohlc[ohlc.length-1][2], daily_vol: vols[ohlc.length-1],
+        /* 末根真实成交额：右上角「额」在异步补全到位前也能直接显示真值 */
+        daily_amt: amts[amts.length-1] || 0,
         ma: { ma5: calcMA(ohlc, 5), ma10: calcMA(ohlc, 10),
               ma20: calcMA(ohlc, 20), ma30: calcMA(ohlc, 30) }
       }
