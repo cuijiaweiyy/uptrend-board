@@ -1001,7 +1001,8 @@
     return s / m;
   }
   /* 成交额序列（元）。优先用东财主源逐根给出的真实成交额；腾讯兜底源没有该字段，才退化成估算。
-     估算公式：成交量单位是「手」→ 元 = 手 × 100 股 × 均价
+     估算公式：成交量单位是「手」（两条源已在解析端统一：东财 f56 本就是手；腾讯主板/创业板是手、
+     科创板是股已换算）→ 元 = 手 × 100 股 × 均价
      （原式写成 手 × 均价 / 100，少乘 1e4，于是 hover 显示的成交额永远到不了「亿」，只剩「万」）。
      注意本函数被三处消费：hover tooltip、成交额副标题、成交额副图 —— 口径必须一致。 */
   function amtSeries(d) {
@@ -1194,7 +1195,12 @@
           dates.push(r[0]);
           /* 腾讯 fqkline 原始序为 开,收,高,低；统一成项目契约 [开,收,低,高]（见 kline.py） */
           ohlc.push([Number(r[1]), Number(r[2]), Number(r[4]), Number(r[3])]);
-          vols.push(Number(r[5]));
+          /* 腾讯日K成交量单位按板块不同（实测 2026-09-13，用 fqkline 自带 qt 三元组 价/量/额 反推）：
+             沪深主板/创业板是「手」，科创板(688/689)是「股」——688239 腾讯给 5,807,613(股)，
+             ÷100 恰好等于东财 f56=58,076(手)。不换算则 hover 量错 100 倍、成交额估算再错 100 倍。 */
+          var v = Number(r[5]);
+          if (/^68[89]/.test(code)) v = v / 100;
+          vols.push(v);
         }
         return {
           ok: true,
@@ -1252,7 +1258,10 @@
         var pr = String(pts[i]).split(' ');          // 腾讯分时每点为空格分隔字符串
         prices.push(Number(pr[1]));
         times.push(pr[0]);
-        var cv = Number(pr[2]) || 0;                 // 累计成交量(手)
+        /* 累计成交量：与日K同规则，主板/创业板是「手」、科创板(688/689)是「股」（实测 688239 分时
+           末点累计 7,358,320 = 日K股数口径）。统一换算成手，否则分时量与均价线(额/(量x100))错 100 倍。 */
+        var cv = Number(pr[2]) || 0;
+        if (/^68[89]/.test(code)) cv = cv / 100;    // 科创板: 股 -> 手
         vols.push(i === 0 ? cv : cv - running);     // 还原为每分钟成交量
         running = cv;
         cumVol.push(cv);
@@ -1287,7 +1296,10 @@
   function emKlineDirect(code, period, days) {
     var secid = emSecid(code);
     var klt = (period === 'week') ? 102 : (period === 'month') ? 103 : 101;
-    var url = 'https://push2.eastmoney.com/api/qt/stock/kline/get?secid=' + secid +
+    /* kline/get 只有 push2his 域名有数据（实测 2026-09-13：push2 与 push2delay 的 kline 恒返回
+       空数组 -> 这里曾永远抛「无数据」-> 静默落到腾讯兜底，所有端都拿不到真实成交额 f57；
+       而 stock/get、trends2 在 push2 正常，所以九宫格有值、K线量额却是估算 —— 极易误判为「接口被拦」。 */
+    var url = 'https://push2his.eastmoney.com/api/qt/stock/kline/get?secid=' + secid +
               '&fields1=f1,f2,f3&fields2=f51,f52,f53,f54,f55,f56,f57' +
               '&klt=' + klt + '&fqt=1&end=20500101&lmt=' + days + '&_=' + Date.now();
     return fetchTxJson(url).then(function (j) {
