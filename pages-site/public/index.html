@@ -466,6 +466,8 @@
 .k-loading, .k-error {
   position: absolute; inset: 0; display: flex; align-items: center;
   justify-content: center; color: #8b93a7; font-size: 13px;
+  /* 纯提示层：绝不能拦截鼠标事件，否则 K 线的 hover/点击会被它整层吃掉（踩过） */
+  pointer-events: none;
 }
 .k-error { color: #ef7070; }
 
@@ -1065,8 +1067,28 @@
   /* ============ 光标悬停 K 线 · 左上角信息卡（当日涨跌幅 / 至今涨幅 + 周期） ============ */
   var dLastDates = [], dLastOhlc = [], dLastLen = 0;
   var _lastInfoIdx = -1;   /* 同一根 K 线不重复刷 DOM（mousemove 高频触发） */
+  /* 保险：信息卡不存在就现建一个。
+     它作为 #klineChart 的子节点，而 renderKline 会整体重建该容器的 innerHTML，
+     模板一旦漏写就会被抹掉（就是这次的根因）。 */
+  function ensureClickInfo() {
+    var el = $('kClickInfo');
+    if (el) return el;
+    var host = $('klineChart');
+    if (!host) return null;
+    el = document.createElement('div');
+    el.className = 'k-click-info';
+    el.id = 'kClickInfo';
+    el.innerHTML =
+      '<span class="d" id="kClickDate">—</span>' +
+      '<div class="day"><span class="lbl">当日</span><span class="v" id="kClickDay">—</span></div>' +
+      '<div class="since"><span class="lbl">至今</span><span class="v" id="kClickSince">—</span>' +
+      '<span class="per" id="kClickPeriod"></span></div>' +
+      '<span class="hint">光标移到 K 线上查看</span>';
+    host.appendChild(el);
+    return el;
+  }
   function showClickInfo(i) {
-    var el = $('kClickInfo'); if (!el) return;
+    var el = ensureClickInfo(); if (!el) return;
     if (i < 0 || i >= dLastLen) { el.style.display = 'none'; return; }
     if (i === _lastInfoIdx && el.style.display !== 'none') return;
     var dates = dLastDates, ohlc = dLastOhlc, n = ohlc.length;
@@ -1094,7 +1116,11 @@
     $('kClickSince').textContent = pv(sincePct) + ' (' + sv(sinceChg) + ')';
     var perEl = $('kClickPeriod');
     if (perEl) perEl.textContent = period > 0 ? (period + ' 周期') : '';
-    el.style.display = '';
+    /* 必须显式设为 block：CSS 里 .k-click-info 是 display:none，
+       赋空串只是把控制权交回 CSS，卡片会被永远隐藏 —— 数据填进去了也看不见（踩过）。 */
+    var hintEl = el.querySelector('.hint');
+    if (hintEl) hintEl.style.display = 'none';   /* 已经在显示数据了，别再提示「光标移到 K 线上查看」 */
+    el.style.display = 'block';
     _lastInfoIdx = i;
   }
   function hideClickInfo() {
@@ -1187,7 +1213,10 @@
           .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
           .then(resolve)
           .catch(function (e) {
-            if (n < 2) { setLoading('行情重试中…'); setTimeout(function () { go(n + 1); }, 900); }
+            /* 静默重试：这里不能再写 setLoading —— 它是公共函数，
+               补全行情（市值/量比/市盈…）失败时会凭空造出一个覆盖全图的
+               loading 层，而且没人会清除它，直接把 K 线的 hover/点击全挡掉。 */
+            if (n < 2) { setTimeout(function () { go(n + 1); }, 900); }
             else reject(e);
           });
       }
@@ -1406,6 +1435,8 @@
     dLastLen   = dLastOhlc.length;
     hideClickInfo();
     clearLoading();
+    /* 重建容器前必须 dispose 旧实例：否则 zrender 的全局渲染循环会随每次重绘不断累积 */
+    if (chart) { try { chart.dispose(); } catch (e) {} chart = null; }
     var el = $('klineChart');
     el.innerHTML = '<div class="k-toolbar" id="kToolbar" style="display:none">' +
                      '<span class="yaxis" id="kToolYax">—</span>' +
@@ -1420,6 +1451,12 @@
                    '</div>' +
                    '<div class="k-subhdr" id="kVolHdr" style="display:none"></div>' +
                    '<div class="k-subhdr" id="kAmtHdr" style="display:none"></div>' +
+                   '<div class="k-click-info" id="kClickInfo">' +
+                     '<span class="d" id="kClickDate">—</span>' +
+                     '<div class="day"><span class="lbl">当日</span><span class="v" id="kClickDay">—</span></div>' +
+                     '<div class="since"><span class="lbl">至今</span><span class="v" id="kClickSince">—</span><span class="per" id="kClickPeriod"></span></div>' +
+                     '<span class="hint">光标移到 K 线上查看</span>' +
+                   '</div>' +
                    '<div class="k-chart" id="kChartInner"></div>';
     chart = echarts.init($('kChartInner'));
 
@@ -1804,6 +1841,7 @@
   /* ============ 分时 ============ */
   function renderMinute(d) {
     clearLoading();
+    if (chart) { try { chart.dispose(); } catch (e) {} chart = null; }
     var el = $('klineChart');
     el.innerHTML = '<div class="k-toolbar" id="kToolbar" style="display:none">' +
                      '<span class="yaxis" id="kToolYax">—</span>' +
