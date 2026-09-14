@@ -434,10 +434,23 @@ async function computeDiff(env, stocks, dateStr, stratKey = 'uptrend') {
   if (!kv) {
     return { prev_date: '', new: [], exited: [], new_count: 0, exited_count: 0, has_baseline: false };
   }
-  let prev = null;
+  // 基准必须是「上一交易日」的快照，而不是当天 key 的快照：
+  // 旧逻辑 kv.get(snapshot:${strat}:${dateStr}) 只认当天，导致跨交易日（周末/节后首日）第一次
+  // 计算拿不到基准 → diff 空（has_baseline=false）；即便拿到也只是「今天盘中 vs 今天盘后」
+  // 自己比自己 → new/exited 全 0。改为在 KV 里遍历 snapshot:${strat}:*，取严格小于 dateStr 的
+  // 最大日期作基准（与 analyze.py 的 compute_diff 对齐）。今日快照（当天 key）只在末尾回写。
+  let prev = null, prevDate = '';
   try {
-    const raw = await kv.get(`snapshot:${stratKey}:${dateStr}`);
-    if (raw) prev = JSON.parse(raw);
+    const list = await kv.list({ prefix: `snapshot:${stratKey}:` });
+    const pre = `snapshot:${stratKey}:`;
+    for (const k of (list.keys || [])) {
+      const d = k.name.slice(pre.length);
+      if (/^\d{8}$/.test(d) && d < dateStr && d > prevDate) prevDate = d;
+    }
+    if (prevDate) {
+      const raw = await kv.get(`snapshot:${stratKey}:${prevDate}`);
+      if (raw) prev = JSON.parse(raw);
+    }
   } catch {
     /* ignore */
   }
@@ -472,7 +485,7 @@ async function computeDiff(env, stocks, dateStr, stratKey = 'uptrend') {
     newList.sort(byName);
     exitedList.sort(byName);
     diff = {
-      prev_date: prev.date || '',
+      prev_date: prevDate || (prev ? (prev.date || '') : ''),
       new: newList,
       exited: exitedList,
       new_count: newList.length,
