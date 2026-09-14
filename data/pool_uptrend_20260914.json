@@ -4,7 +4,7 @@
   "query": "上升途中 所属同花顺行业 所属概念",
   "source": "同花顺问财 iwencai（口径：上升途中 → 上升通道）",
   "strategy": "uptrend",
-  "fetched_at": "2026-09-14 22:21:58",
+  "fetched_at": "2026-09-15 01:30:55",
   "count": 108,
   "stocks": [
     {
@@ -3352,8 +3352,8 @@
       "industry": "轻工制造-包装印刷-包装",
       "concepts": [
         "融资融券",
-        "一带一路",
-        "股权转让(并购重组)"
+        "股权转让(并购重组)",
+        "一带一路"
       ],
       "concept_count": 3,
       "buy_signal": "cci买入信号||月线bias买入信号||月线skdj超卖",
