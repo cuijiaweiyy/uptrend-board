@@ -25,17 +25,17 @@ const STRATEGIES = {
     key: 'uptrend',
     label: '上升途中',
     cond: '上升途中',
-    extra: '所属同花顺行业 所属概念',
+    extra: '所属同花顺行业 所属概念 近45日最大涨幅',
     source: '同花顺问财 iwencai（口径：上升途中 → 上升通道）',
-    query: '上升途中 所属同花顺行业 所属概念',
+    query: '上升途中 所属同花顺行业 所属概念 近45日最大涨幅',
   },
   ma: {
     key: 'ma',
     label: '均线多头排列',
     cond: '日均线多头排列 周均线多头排列 可交易',
-    extra: '所属同花顺行业 所属概念 成交额',
+    extra: '所属同花顺行业 所属概念 成交额 近45日最大涨幅',
     source: '同花顺问财 iwencai（口径：日均线多头排列 + 周均线多头排列 + 可交易）',
-    query: '日均线多头排列 周均线多头排列 可交易 所属同花顺行业 所属概念 成交额',
+    query: '日均线多头排列 周均线多头排列 可交易 所属同花顺行业 所属概念 成交额 近45日最大涨幅',
   },
 };
 const CACHE_TTL = 300; // 5 分钟：问财限流很凶，必须缓存
@@ -186,6 +186,19 @@ async function mapLimit(items, limit, worker, minGap = DEFAULT_MIN_GAP) {
 
 // ---------- 行归一化 ----------
 
+// 单日涨幅达到多少算「涨停」——按板块区分涨跌幅限制。
+// 用 9.5 / 19.5 / 29.5 而不是 10 / 20 / 30：涨停价 = 前收 ×(1+限制) 四舍五入到分，
+// 低价股的实际涨幅可能略低于整数限制（如 3.33→3.66 只有 +9.91%），留 0.5 个点的容差。
+function ztThreshold(code, name) {
+  const n = String(name || '');
+  if (n.toUpperCase().includes('ST') || n.startsWith('*')) return 4.8; // ST/ST* 限 5%
+  const c = String(code || '');
+  if (/^30[01]/.test(c)) return 19.5; // 创业板
+  if (/^68[89]/.test(c)) return 19.5; // 科创板
+  if (/^(8|4|920)/.test(c)) return 29.5; // 北交所（含 920xxx 新代码段）
+  return 9.5; // 沪深主板
+}
+
 function normRow(r) {
   const pick = (...keys) => {
     for (const k of keys) {
@@ -219,6 +232,23 @@ function normRow(r) {
     MARKET_MAP[marketCode] ||
     (String(fullCode).includes('.') ? String(fullCode).split('.').pop() : '');
 
+  // 近45日单日最大涨幅 / 涨停天数。
+  // ⚠️ 不能向问财请求「近45日涨停次数」：问财会把它当成硬过滤条件（≈"涨停次数≥1"），
+  //    实测「上升途中」池由 63 只骤降到 21 只。因此只请求「近45日最大涨幅」，
+  //    它会展开成 45 根单日列，涨停天数再由这些单日值按板块阈值数出来（见 ztThreshold）。
+  const chgDays = [];
+  for (const k of Object.keys(r)) {
+    if (!k.includes('最大涨幅')) continue;
+    const n = Number(r[k]);
+    if (Number.isFinite(n)) chgDays.push(n);
+  }
+  const maxchg45 = chgDays.length
+    ? Math.round(Math.max(...chgDays) * 100) / 100
+    : null;
+  const zt45 = chgDays.length
+    ? chgDays.filter((n) => n >= ztThreshold(code6 || fullCode, name)).length
+    : null;
+
   return {
     code: code6,
     full_code: fullCode,
@@ -236,15 +266,18 @@ function normRow(r) {
     tech_pattern: pick('技术形态') ?? dyn('技术形态'),
     is_st: name.toUpperCase().includes('ST') || name.startsWith('*'),
     amount: fnum(pick('成交额') ?? dyn('成交额')),
+    zt45,
+    maxchg45,
   };
 }
 
 // ---------- 抓取股票池（全量）----------
 // 按交易所分段抓取「上升途中」全量池，而非按行业：
 //   问财对「上升途中 + 部分行业名(医药生物/汽车等)」的组合解析不稳定，恒返回 0（condition 为空）；
-//   而「上升途中 + 沪市/深市」稳定解析，且 沪(≈43)+深(≈61)=104 覆盖全量，每段 <100 不受 perpage 上限截断。
+//   而「上升途中 + 沪市/深市/北交所」稳定解析，且 沪(≈43)+深(≈61)+北交所(含 920xxx 前缀) 覆盖全量，每段 <100 不受 perpage 上限截断。
 //   行业分类交由问财在返回行里用「所属同花顺行业」字段给出，避免我们自己用申万名去套导致整段落空。
-const EXCHANGE_SEGS = [{ q: '沪市' }, { q: '深市' }];
+//   注意：北交所代码前缀含 830-839 / 87xxxx / 88xxxx / 920xxx，920xxx 是 2024 年后新发行的北交所新股，不能只按 8xx 判定。
+const EXCHANGE_SEGS = [{ q: '沪市' }, { q: '深市' }, { q: '北交所' }];
 
 export async function fetchPool(token, stratKey = 'uptrend', maxPasses = 3, minGap = DEFAULT_MIN_GAP, deadline = 0) {
   const cfg = STRATEGIES[stratKey] || STRATEGIES.uptrend;
@@ -318,6 +351,8 @@ function buildSector(counter, stockMap, totals, level) {
           concepts: s.concepts || [],
           is_st: s.is_st,
           amount: null, // 成交额由前端实时行情接口补全
+          zt45: s.zt45,
+          maxchg45: s.maxchg45,
         })),
       };
     })
@@ -469,6 +504,8 @@ async function computeDiff(env, stocks, dateStr, stratKey = 'uptrend') {
     concepts: s.concepts || [],
     amount: s.amount,
     is_st: s.is_st,
+    zt45: s.zt45,
+    maxchg45: s.maxchg45,
   });
 
   let diff;
@@ -542,6 +579,8 @@ export async function computeBoardFromStocks(stocks, tradeDate, env, failed = []
         price: s.price,
         chg: s.chg_pct,
         amount: s.amount,
+        zt45: s.zt45,
+        maxchg45: s.maxchg45,
       })),
     },
     boards,

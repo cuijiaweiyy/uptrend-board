@@ -1132,6 +1132,9 @@ def pack_data(data):
     背景：同一批股票在 300+ 个概念板块里被重复携带，concepts/industry 字符串
     反复出现，是页面体积的主要来源。编码为索引后可显著缩小；同时去掉前端已
     不再展示的 is_st 字段。
+
+    2026-09-16 修正：不再剔除 is_st —— 前端「剔除 ST」开关依赖该字段，
+    剔除后静态产物（GitHub Pages）的开关会静默失效（!undefined 恒真）。
     """
     cdict, clist = {}, []
     idict, ilist = {}, []
@@ -1156,7 +1159,7 @@ def pack_data(data):
                 ilist.append(ind)
             st["i"] = idict[ind]
             del st["industry"]
-        st.pop("is_st", None)
+        # is_st 保留：前端「剔除 ST」开关要用（见 pack_data docstring）
 
     boards = data.get("boards") or {}
     for key in ("industry_l1", "industry_l2", "industry_l3", "concept"):
@@ -1210,7 +1213,7 @@ def enrich_amounts(data, date_str):
     def prefix(code):
         if code.startswith("6"):
             return "sh" + code
-        if code.startswith(("4", "8")):
+        if code.startswith(("4", "8", "920")):  # 北交所（920xxx 为 2024 后新代码段）
             return "bj" + code
         return "sz" + code
 

@@ -174,6 +174,10 @@ def _stock_brief(s):
         "concepts": s.get("concepts") or [],
         "is_st": s["is_st"],
         "amount": None,  # 由 build_html.enrich_amounts 补全
+        # 近45日「涨停天数 / 单日最大涨幅」：前端「可选条件」纯前端过滤要用，
+        # 必须随行内联下发（勾选/拖滑块时不能回问财或 KV）。
+        "zt45": s.get("zt45"),
+        "maxchg45": s.get("maxchg45"),
     }
 
 
@@ -236,6 +240,7 @@ def compute_diff(date_str, strat="uptrend"):
             "price": s.get("price"), "chg": s.get("chg_pct"),
             "ind_l1": s.get("ind_l1"), "ind_l2": s.get("ind_l2"), "ind_l3": s.get("ind_l3"),
             "concepts": s.get("concepts", []), "is_st": s.get("is_st", False),
+            "zt45": s.get("zt45"), "maxchg45": s.get("maxchg45"),
         }
 
     new_codes = cur_codes - prev_codes

@@ -176,6 +176,16 @@
     <div class="stab" data-s="ma">均线多头排列</div>
   </div>
 
+  <div class="optbar" id="optbar">
+    <label class="chk"><input type="checkbox" id="optOn"> 只看近45日「涨停 / 大涨」股</label>
+    <span class="opt-slider" id="optSlider">
+      <span class="hint">大涨阈值 ≥</span>
+      <input id="optThr" type="range" min="5" max="20" step="1" value="10">
+      <b id="optThrVal">10%</b>
+    </span>
+    <span class="hint" id="optHint">作用于概览 / 板块 / 今日变动（双策略通用）</span>
+  </div>
+
   <div class="toptabs" id="toptabs">
     <div class="ttab on" data-t="overview">概览</div>
     <div class="ttab" data-t="new">今日变动</div>
@@ -230,9 +240,9 @@
   <div class="card">
   <div class="ctrl">
     <div class="seg" id="segBoard">
-      <div class="tab on" data-b="industry_l1">一级行业</div>
+      <div class="tab" data-b="industry_l1">一级行业</div>
       <div class="tab" data-b="industry_l2">二级行业</div>
-      <div class="tab" data-b="industry_l3">三级行业</div>
+      <div class="tab on" data-b="industry_l3">三级行业</div>
       <div class="tab" data-b="concept">概念题材</div>
     </div>
     <div class="seg" id="segSort">
@@ -2006,13 +2016,13 @@ var STRAT_META = {
     label: '上升途中',
     title: '上升途中 · 板块统计看板',
     sub: '口径：同花顺问财「上升途中」（实际解析为技术形态 <b>上升通道</b>）',
-    query: '上升途中 所属同花顺行业 所属概念'
+    query: '上升途中 所属同花顺行业 所属概念 近45日最大涨幅'
   },
   ma: {
     label: '均线多头排列',
     title: '均线多头排列 · 板块统计看板',
     sub: '口径：同花顺问财「日均线多头排列 + 周均线多头排列 + 可交易」',
-    query: '日均线多头排列 周均线多头排列 可交易 所属同花顺行业 所属概念 成交额'
+    query: '日均线多头排列 周均线多头排列 可交易 所属同花顺行业 所属概念 成交额 近45日最大涨幅'
   }
 };
 /* 「均线多头排列」离线兜底数据（build_html.py 注入，同样做了字典打包，这里还原）。
@@ -2120,7 +2130,7 @@ function applyCombined(payload) {
   if (Array.isArray(DATA.pool)) { DATA.pool.forEach(fix); }
 })();
 
-var state = { board: 'industry_l1', sortBy: 'hit', exst: false, open: {} };
+var state = { board: 'industry_l3', sortBy: 'hit', exst: false, open: {} };
 var chart = null;
 
 function pct(v) { return v === null || v === undefined ? '—' : (v * 100).toFixed(1) + '%'; }
@@ -2148,6 +2158,17 @@ function escHtml(s) {
   });
 }
 
+/* 可选条件：近45日「单日涨停 或 最大涨幅≥阈值%」。纯前端过滤，不回问财/KV，秒切换。 */
+function passFilter(s) {
+  if (!state.optOn) return true;
+  var zt = s.zt45, mx = s.maxchg45;
+  // 数据缺失（如昨日快照还没带这两列）时放行，避免整块内容被误清空。
+  if (typeof zt !== 'number' && typeof mx !== 'number') return true;
+  var hasZt = (typeof zt === 'number') && zt >= 1;
+  var hasBig = (typeof mx === 'number') && mx >= state.optThr;
+  return hasZt || hasBig;
+}
+
 function getRows() {
   var raw = DATA.boards[state.board] || [];
   var rows = [];
@@ -2156,6 +2177,9 @@ function getRows() {
     var st = b.stocks || [];
     if (state.exst) {
       st = st.filter(function (s) { return !s.is_st; });
+    }
+    if (state.optOn) {
+      st = st.filter(passFilter);
     }
     if (st.length === 0) continue;
     var total = b.total || 0;
@@ -2423,10 +2447,19 @@ function renderDiff(view) {
     body.innerHTML = '';
     return;
   }
-  hint.innerHTML = '对比上一交易日 <b>' + d.prev_date + '</b>：今日新进入 ' +
+  var hintHtml = '对比上一交易日 <b>' + d.prev_date + '</b>：今日新进入 ' +
     '<b style="color:#c0392b">' + d.new_count + '</b> 只，退出 ' +
     '<b style="color:#16a34a">' + d.exited_count + '</b> 只。';
+  if (state.optOn) {
+    var _fc = (view === 'exited')
+      ? (d.exited || []).filter(passFilter).length
+      : (d.new || []).filter(passFilter).length;
+    hintHtml += ' <span style="color:#6b7280">（满足「涨停 / 大涨≥' + state.optThr + '%」' +
+      (view === 'exited' ? '退出 ' : '新进 ') + _fc + ' 只）</span>';
+  }
+  hint.innerHTML = hintHtml;
   var rows = (view === 'exited' ? (d.exited || []) : (d.new || [])).slice();
+  if (state.optOn) rows = rows.filter(passFilter);
   rows.sort(function (a, b) { return (b.amount || 0) - (a.amount || 0); });  // 按当日成交额从大到小
   if (!rows.length) {
     body.innerHTML = '<div style="color:#9ca3af;text-align:center;padding:14px;">' +
@@ -2549,6 +2582,18 @@ document.getElementById('exst').onchange = function () {
   state.exst = this.checked;
   state.open = {};
   render();
+};
+
+/* 可选条件：近45日「涨停 / 大涨」—— 选择一次作用于三处，纯前端秒切换 */
+document.getElementById('optOn').onchange = function () {
+  state.optOn = this.checked;
+  document.getElementById('optSlider').classList.toggle('on', this.checked);
+  render();
+};
+document.getElementById('optThr').oninput = function () {
+  state.optThr = parseInt(this.value, 10) || 10;
+  document.getElementById('optThrVal').textContent = state.optThr + '%';
+  if (state.optOn) render();
 };
 
 /* 顶层分屏 tab：概览 / 板块 / 剔除 */

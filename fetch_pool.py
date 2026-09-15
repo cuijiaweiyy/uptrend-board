@@ -23,17 +23,17 @@ STRATEGIES = {
     "uptrend": {
         "label": "上升途中",
         "cond": "上升途中",
-        "extra": "所属同花顺行业 所属概念",
+        "extra": "所属同花顺行业 所属概念 近45日最大涨幅",
         "source_note": "同花顺问财 iwencai（口径：上升途中 → 上升通道）",
-        "query_note": "上升途中 所属同花顺行业 所属概念",
+        "query_note": "上升途中 所属同花顺行业 所属概念 近45日最大涨幅",
         "sort_by_amount": False,
     },
     "ma": {
         "label": "均线多头排列",
         "cond": "日均线多头排列 周均线多头排列 可交易",
-        "extra": "所属同花顺行业 所属概念 成交额",
+        "extra": "所属同花顺行业 所属概念 成交额 近45日最大涨幅",
         "source_note": "同花顺问财 iwencai（日均线多头排列 + 周均线多头排列 + 可交易）",
-        "query_note": "日均线多头排列 周均线多头排列 可交易 所属同花顺行业 所属概念 成交额",
+        "query_note": "日均线多头排列 周均线多头排列 可交易 所属同花顺行业 所属概念 成交额 近45日最大涨幅",
         "sort_by_amount": True,
     },
 }
@@ -55,6 +55,23 @@ def _dyn(r, prefix):
         if k.startswith(prefix):
             return v
     return None
+
+
+def zt_threshold(code, name):
+    """单日涨幅达到多少算「涨停」——按板块涨跌幅限制区分。
+
+    用 9.5 / 19.5 / 29.5 而不是 10 / 20 / 30：涨停价 = 前收 ×(1+限制) 四舍五入到分，
+    低价股的实际涨幅可能略低于整数限制（如 3.33→3.66 只有 +9.91%），留 0.5 个点容差。
+    """
+    n = str(name or "")
+    if "ST" in n.upper() or n.startswith("*"):
+        return 4.8  # ST 股限 5%
+    c = str(code or "")
+    if c.startswith(("300", "301")) or c.startswith(("688", "689")):
+        return 19.5  # 创业板 / 科创板
+    if c.startswith(("8", "4", "920")):
+        return 29.5  # 北交所（含 920xxx 新代码段）
+    return 9.5  # 沪深主板
 
 
 def norm_row(r):
@@ -94,6 +111,25 @@ def norm_row(r):
             if amount is not None:
                 break
 
+    # 近45日单日最大涨幅 / 涨停天数。
+    # ⚠️ 不能向问财请求「近45日涨停次数」：问财会把它当成硬过滤条件（≈"涨停次数≥1"），
+    #    实测「上升途中」池由 63 只骤降到 21 只。因此只请求「近45日最大涨幅」，
+    #    它会展开成 45 根单日列「最大涨幅[日期]」，涨停天数再由这些单日值按板块阈值数出。
+    chg_days = []
+    for k, v in r.items():
+        if "最大涨幅" not in k:
+            continue
+        try:
+            chg_days.append(float(v))
+        except (TypeError, ValueError):
+            pass
+    maxchg45 = round(max(chg_days), 2) if chg_days else None
+    zt45 = (
+        sum(1 for x in chg_days if x >= zt_threshold(code6, name))
+        if chg_days
+        else None
+    )
+
     return {
         "code": code6,
         "full_code": full_code,
@@ -111,6 +147,8 @@ def norm_row(r):
         "buy_signal": pick("买入信号inter") or _dyn(r, "买入信号inter"),
         "tech_pattern": pick("技术形态") or _dyn(r, "技术形态"),
         "is_st": ("ST" in name.upper()) or name.startswith("*"),
+        "zt45": zt45,
+        "maxchg45": maxchg45,
     }
 
 
