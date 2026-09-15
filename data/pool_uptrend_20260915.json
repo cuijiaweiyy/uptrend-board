@@ -4,7 +4,7 @@
   "query": "上升途中 所属同花顺行业 所属概念",
   "source": "同花顺问财 iwencai（口径：上升途中 → 上升通道）",
   "strategy": "uptrend",
-  "fetched_at": "2026-09-15 20:51:06",
+  "fetched_at": "2026-09-16 00:06:44",
   "count": 63,
   "stocks": [
     {
