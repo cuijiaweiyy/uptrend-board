@@ -23,9 +23,9 @@ STRATEGIES = {
     "uptrend": {
         "label": "上升途中",
         "cond": "上升途中",
-        "extra": "所属同花顺行业 所属概念 近45日最大涨幅",
+        "extra": "所属同花顺行业 所属概念 成交额 近45日最大涨幅",
         "source_note": "同花顺问财 iwencai（口径：上升途中 → 上升通道）",
-        "query_note": "上升途中 所属同花顺行业 所属概念 近45日最大涨幅",
+        "query_note": "上升途中 所属同花顺行业 所属概念 成交额 近45日最大涨幅",
         "sort_by_amount": False,
     },
     "ma": {

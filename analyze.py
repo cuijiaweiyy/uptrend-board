@@ -173,7 +173,9 @@ def _stock_brief(s):
         "industry": s["industry"],
         "concepts": s.get("concepts") or [],
         "is_st": s["is_st"],
-        "amount": None,  # 由 build_html.enrich_amounts 补全
+        # 成交额已由 fetch_pool.norm_row 从问财「成交额」列读取（与 MA 一致），
+        # 这里原样透传；build_html.enrich_amounts 仅用腾讯实时值作缺值兜底，不再覆盖成 None。
+        "amount": s.get("amount"),
         # 近45日「涨停天数 / 单日最大涨幅」：前端「可选条件」纯前端过滤要用，
         # 必须随行内联下发（勾选/拖滑块时不能回问财或 KV）。
         "zt45": s.get("zt45"),
@@ -311,6 +313,23 @@ def main(date_str=None, strat="uptrend"):
             "sh": sum(1 for s in stocks if s["exchange"] == "SH"),
             "sz": sum(1 for s in stocks if s["exchange"] == "SZ"),
             "bj": sum(1 for s in stocks if s["exchange"] == "BJ"),
+            # 主列表个股明细：前端 getPool() 直接读 DATA.pool.stocks。
+            # 字段与 Worker computeBoardFromStocks 对齐（不含 concepts，前端搜索池不依赖它）；
+            # amount 已由 fetch_pool.norm_row 从问财「成交额」列读取（_stock_brief 透传），主列表成交额得以显示。
+            "stocks": [
+                {
+                    "code": s["code"],
+                    "name": s["name"],
+                    "price": s["price"],
+                    "chg": s["chg_pct"],
+                    "industry": s.get("industry"),
+                    "is_st": s["is_st"],
+                    "amount": s.get("amount"),
+                    "zt45": s.get("zt45"),
+                    "maxchg45": s.get("maxchg45"),
+                }
+                for s in stocks
+            ],
         },
         "boards": {
             "industry_l1": build_board(c_l1, m_l1, t_l1),

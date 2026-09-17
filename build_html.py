@@ -1248,7 +1248,11 @@ def enrich_amounts(data, date_str):
         except Exception as e:
             print("  [warn] 当日成交额获取失败，成交额列将显示 — ：", e)
     for r in rows:
-        r["amount"] = cache.get(r.get("code"))
+        v = cache.get(r.get("code"))
+        if v is not None:
+            # 仅用腾讯实时值补缺；不覆盖 fetch_pool/问财已带的非空成交额
+            # （否则腾讯不可达时会被抹成 None，丢失问财好值）
+            r["amount"] = v
 
 
 def main(date_str=None):

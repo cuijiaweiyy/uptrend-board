@@ -25,9 +25,9 @@ const STRATEGIES = {
     key: 'uptrend',
     label: '上升途中',
     cond: '上升途中',
-    extra: '所属同花顺行业 所属概念 近45日最大涨幅',
+    extra: '所属同花顺行业 所属概念 成交额 近45日最大涨幅',
     source: '同花顺问财 iwencai（口径：上升途中 → 上升通道）',
-    query: '上升途中 所属同花顺行业 所属概念 近45日最大涨幅',
+    query: '上升途中 所属同花顺行业 所属概念 成交额 近45日最大涨幅',
   },
   ma: {
     key: 'ma',
@@ -350,7 +350,7 @@ function buildSector(counter, stockMap, totals, level) {
           industry: s.industry,
           concepts: s.concepts || [],
           is_st: s.is_st,
-          amount: null, // 成交额由前端实时行情接口补全
+          amount: s.amount, // 成交额取自问财（与 MA 一致）；前端无需再补
           zt45: s.zt45,
           maxchg45: s.maxchg45,
         })),
