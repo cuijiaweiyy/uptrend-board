@@ -1624,7 +1624,7 @@
         label: { show: false } }
     ] : [];
 
-    chart.setOption({
+    var kOption = {
       animation: false,
       backgroundColor: 'transparent',
       textStyle: { color: '#d9dee8', fontSize: 11 },
@@ -1781,7 +1781,7 @@
           symbol: 'none', smooth: true,
           lineStyle: { width: 1, color: C.ma10 }, animation: false }
       ]
-    }, true);
+    }; chart.setOption(kOption, true);
 
     var mainLow = Infinity, mainHi = -Infinity;
     for (var yi = 0; yi < n; yi++) {
@@ -1851,13 +1851,26 @@
         var ix = p.dataIndex;
         var extra = dashLines.concat(markData);  // 保留 avg 区间线 + 入选日标记（点击高亮不丢）
         try {
-          chart.setOption({
-            series: [{ name: 'K线', markLine: {
-              symbol: 'none', silent: true, animation: false,
-              data: [{ xAxis: ix, lineStyle: { color: '#fbbf24', type: 'solid', width: 1, opacity: 0.85 },
-                       label: { show: false } }].concat(extra)
-            }}]
-          }, { replaceMerge: ['series'] });
+          /* 关键修复（黑屏根因）：原代码用 replaceMerge:['series'] 只传了单个 'K线' series，
+             会把 MA5/MA10/MA20/MA30、成交量、成交额等其它 series 整体删除，且 'K线' 自定义系列
+             被换成空的默认 line 系列——每次点击图表就几乎清空，在 #101010 黑底上表现为黑屏。
+             改为：复用完整 kOption（含全部 series），只更新 series[0] 的 markLine 高亮线，
+             整体 replaceMerge——既保留所有 series，又干净替换高亮。同时保留用户当前缩放区间，
+             避免点击后缩放回弹。 */
+          var ml = {
+            symbol: 'none', silent: true, clipOverflow: false, animation: false,
+            data: [{ xAxis: ix, lineStyle: { color: '#fbbf24', type: 'solid', width: 1, opacity: 0.85 },
+                     label: { show: false } }].concat(extra)
+          };
+          var curZoom = null;
+          try { var _dz = chart.getOption().dataZoom; if (_dz && _dz[0]) curZoom = { s: _dz[0].start, e: _dz[0].end }; } catch (e2) {}
+          if (kOption && kOption.series && kOption.series[0]) {
+            kOption.series[0].markLine = ml;
+            chart.setOption(kOption, { replaceMerge: ['series'] });
+            if (curZoom) chart.dispatchAction({ type: 'dataZoom', start: curZoom.s, end: curZoom.e });
+          } else {
+            chart.setOption({ series: [{ name: 'K线', markLine: ml }] });
+          }
         } catch(e){}
       }
     });
