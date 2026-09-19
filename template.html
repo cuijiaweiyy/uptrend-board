@@ -79,6 +79,9 @@
   .diffcard .dleft { display:flex; flex-direction:column; flex:0 0 auto; min-width:0; }
   .diffcard .dname { font-weight:600; font-size:13px; color:#1f2937; display:flex; align-items:center; gap:4px; white-space:nowrap; overflow:hidden; }
   .diffcard .dname .st { flex:0 0 auto; }
+  /* 北交所标签：与 K 线弹窗（.k-sub .tag.bj）视觉一致，保证全站口径统一 */
+  .diffcard .dname .bj { flex:0 0 auto; background:#1e3a8a; color:#fff;
+        font-size:11px; padding:1px 5px; border-radius:4px; }
   .diffcard .dcode { font-size:11px; color:#9ca3af; margin-top:1px; font-variant-numeric:tabular-nums; white-space:nowrap; }
   .diffcard .dprice { font-weight:700; font-size:13px; color:#1f2937; min-width:62px; text-align:right; font-variant-numeric:tabular-nums; }
   /* 题材：位于「涨幅」与「成交额」之间，小字固定两行 + 限宽，避免挤动价格/涨幅位置 */
@@ -2211,6 +2214,13 @@ function escHtml(s) {
   });
 }
 
+/* 北交所判定（与 K 线弹窗 prefix() 同口径）：代码前缀 4 / 8 / 920 属北交所。
+   嵌入数据未携带交易所字段，故统一从代码前缀推导，避免列表与弹窗口径不一致。 */
+function isBJCode(c) {
+  c = String(c || '');
+  return /^(8|4|920)/.test(c);
+}
+
 /* 可选条件：近45日「单日涨停 或 最大涨幅≥阈值%」。纯前端过滤，不回问财/KV，秒切换。 */
 function passFilter(s) {
   if (!state.optOn) return true;
@@ -2428,6 +2438,7 @@ function renderTable(rows) {
           consHtml = '<span class="empty">—</span>';
         }
         var stTag = s.is_st ? '<span class="st">ST</span>' : '';
+        var bjTag = isBJCode(s.code) ? '<span class="bj">北交所</span>' : '';
         cards += '<div class="diffcard kline-trigger" data-code="' + s.code + '"' +
           ' data-ind="' + escAttr(s.ind_l1 || '') + '"' +
           ' data-con="' + escAttr((consSrc || []).join(',')) + '"' +
@@ -2437,7 +2448,7 @@ function renderTable(rows) {
           '<div class="dmain">' +
             '<span class="drank">' + (k + 1) + '</span>' +
             '<div class="dleft">' +
-              '<div class="dname">' + escHtml(s.name) + '</div>' +
+              '<div class="dname">' + escHtml(s.name) + bjTag + stTag + '</div>' +
               '<div class="dcode">' + s.code + '</div>' +
             '</div>' +
             '<div class="dprice">' + fmtPrice(s.price) + '</div>' +
@@ -2551,6 +2562,7 @@ function renderDiff(view) {
       consHtml = '<span class="empty">—</span>';
     }
     var stTag = s.is_st ? '<span class="st">ST</span>' : '';
+    var bjTag = isBJCode(s.code) ? '<span class="bj">北交所</span>' : '';
     html += '<div class="diffcard kline-trigger" data-code="' + s.code + '"' +
       ' data-ind="' + escAttr(s.ind_l1 || '') + '"' +
       ' data-con="' + escAttr((s.concepts || []).join(',')) + '"' +
@@ -2561,7 +2573,7 @@ function renderDiff(view) {
       '<div class="dmain">' +
         '<span class="drank">' + (i + 1) + '</span>' +
         '<div class="dleft">' +
-          '<div class="dname">' + escHtml(s.name) + '</div>' +
+          '<div class="dname">' + escHtml(s.name) + bjTag + stTag + '</div>' +
           '<div class="dcode">' + s.code + '</div>' +
         '</div>' +
         '<div class="dprice">' + fmtPrice(s.price) + '</div>' +
