@@ -1190,33 +1190,30 @@
     }
     return out;
   }
-  function txKlineDirect(code, period, days) {
+  /* 腾讯日K解析（被浏览器直连与同源代理两条路径共用，单一数据源） */
+  function buildTxKline(j, code, period, days) {
     var sym = txSym(code);
-    var url = 'https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=' +
-              sym + ',' + period + ',,,' + days + ',qfq';
-    return fetchTxJson(url)
-      .then(function (j) {
-        var node = (j && j.data && j.data[sym]) || {};
-        var rows = node['qfq' + period] || node[period] || [];
-        if (!rows || !rows.length) throw new Error('无数据');
-        var dates = [], ohlc = [], vols = [];
-        for (var i = 0; i < rows.length; i++) {
-          var r = rows[i];
-          dates.push(r[0]);
-          /* 腾讯 fqkline 原始序为 开,收,高,低；统一成项目契约 [开,收,低,高]（见 kline.py） */
-          ohlc.push([Number(r[1]), Number(r[2]), Number(r[4]), Number(r[3])]);
-          /* 腾讯日K成交量单位按板块不同（实测 2026-09-13，用 fqkline 自带 qt 三元组 价/量/额 反推）：
-             沪深主板/创业板是「手」，科创板(688/689)是「股」——688239 腾讯给 5,807,613(股)，
-             ÷100 恰好等于东财 f56=58,076(手)。不换算则 hover 量错 100 倍、成交额估算再错 100 倍。 */
-          var v = Number(r[5]);
-          if (/^68[89]/.test(code)) v = v / 100;
-          vols.push(v);
-        }
-        return {
-          ok: true,
-          data: {
-            code: code, name: txName(code), period: period, days: days,
-            dates: dates, ohlc: ohlc, volumes: vols,
+    var node = (j && j.data && j.data[sym]) || {};
+    var rows = node['qfq' + period] || node[period] || [];
+    if (!rows || !rows.length) throw new Error('无数据');
+    var dates = [], ohlc = [], vols = [];
+    for (var i = 0; i < rows.length; i++) {
+      var r = rows[i];
+      dates.push(r[0]);
+      /* 腾讯 fqkline 原始序为 开,收,高,低；统一成项目契约 [开,收,低,高]（见 kline.py） */
+      ohlc.push([Number(r[1]), Number(r[2]), Number(r[4]), Number(r[3])]);
+      /* 腾讯日K成交量单位按板块不同（实测 2026-09-13，用 fqkline 自带 qt 三元组 价/量/额 反推）：
+         沪深主板/创业板是「手」，科创板(688/689)是「股」——688239 腾讯给 5,807,613(股)，
+         ÷100 恰好等于东财 f56=58,076(手)。不换算则 hover 量错 100 倍、成交额估算再错 100 倍。 */
+      var v = Number(r[5]);
+      if (/^68[89]/.test(code)) v = v / 100;
+      vols.push(v);
+    }
+    return {
+      ok: true,
+      data: {
+        code: code, name: txName(code), period: period, days: days,
+        dates: dates, ohlc: ohlc, volumes: vols,
         last: { close: ohlc[ohlc.length-1][1], open: ohlc[ohlc.length-1][0],
                 high: ohlc[ohlc.length-1][3], low: ohlc[ohlc.length-1][2],
                 vol: vols[ohlc.length-1] },
@@ -1226,8 +1223,14 @@
         ma: { ma5: calcMA(ohlc, 5), ma10: calcMA(ohlc, 10),
               ma20: calcMA(ohlc, 20), ma30: calcMA(ohlc, 30) }
       }
-      };
-      });
+    };
+  }
+  /* 浏览器直连腾讯（代理不可达时的兜底） */
+  function txKlineDirect(code, period, days) {
+    var sym = txSym(code);
+    var url = 'https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=' +
+              sym + ',' + period + ',,,' + days + ',qfq';
+    return fetchTxJson(url).then(function (j) { return buildTxKline(j, code, period, days); });
   }
 
   /* 腾讯行情直连：带一次重试，吸收瞬时波动 */
@@ -1250,6 +1253,48 @@
   }
 
   /* 分时直连腾讯：价格/均价/量取自分钟线，昨收取自日K前一日收盘 */
+  /* 腾讯分时解析（被浏览器直连与同源代理两条路径共用）。
+     dj 为用于推算昨收的日K数据，代理路径可能为空（prev_close 退化为 null，不影响主图）。 */
+  function buildTxMinute(mj, dj, code) {
+    var sym = txSym(code);
+    var node = (mj && mj.data && mj.data[sym]) || {};
+    var md = node.data || {};
+    var pts = md.data || [];
+    if (!pts.length) throw new Error('无分时数据');
+    var prices = [], times = [], vols = [], cumAmt = [], cumVol = [], running = 0;
+    for (var i = 0; i < pts.length; i++) {
+      var pr = String(pts[i]).split(' ');          // 腾讯分时每点为空格分隔字符串
+      prices.push(Number(pr[1]));
+      times.push(pr[0]);
+      /* 累计成交量：与日K同规则，主板/创业板是「手」、科创板(688/689)是「股」（实测 688239 分时
+         末点累计 7,358,320 = 日K股数口径）。统一换算成手，否则分时量与均价线(额/(量x100))错 100 倍。 */
+      var cv = Number(pr[2]) || 0;
+      if (/^68[89]/.test(code)) cv = cv / 100;    // 科创板: 股 -> 手
+      vols.push(i === 0 ? cv : cv - running);     // 还原为每分钟成交量
+      running = cv;
+      cumVol.push(cv);
+      cumAmt.push(Number(pr[3]) || 0);             // 累计成交额(元)
+    }
+    var avg = cumVol.map(function (cv, i) {
+      return cv > 0 ? +(cumAmt[i] / (cv * 100)).toFixed(3) : prices[i];
+    });
+    var prev = null;
+    if (dj) {
+      var dnode = (dj.data && dj.data[sym]) || {};
+      var drows = dnode.qfqday || dnode.day || [];
+      if (drows.length >= 2) prev = Number(drows[drows.length - 2][2]);   // 昨收
+      else if (drows.length === 1) prev = Number(drows[0][2]);
+    }
+    return {
+      ok: true,
+      data: {
+        code: code, name: txName(code), period: 'minute', days: 1,
+        date: md.date || '', times: times, prices: prices,
+        vols: vols, avg: avg, prev_close: prev
+      }
+    };
+  }
+  /* 浏览器直连腾讯分时（代理不可达时的兜底） */
   function txMinuteDirect(code) {
     var sym = txSym(code);
     var mUrl = 'https://web.ifzq.gtimg.cn/appstock/app/minute/query?code=' + sym;
@@ -1257,45 +1302,7 @@
     return Promise.all([
       fetchTxJson(mUrl),
       fetchTxJson(dUrl).catch(function () { return null; })
-    ]).then(function (res) {
-      var mj = res[0], dj = res[1];
-      var node = (mj && mj.data && mj.data[sym]) || {};
-      var md = node.data || {};
-      var pts = md.data || [];
-      if (!pts.length) throw new Error('无分时数据');
-      var prices = [], times = [], vols = [], cumAmt = [], cumVol = [], running = 0;
-      for (var i = 0; i < pts.length; i++) {
-        var pr = String(pts[i]).split(' ');          // 腾讯分时每点为空格分隔字符串
-        prices.push(Number(pr[1]));
-        times.push(pr[0]);
-        /* 累计成交量：与日K同规则，主板/创业板是「手」、科创板(688/689)是「股」（实测 688239 分时
-           末点累计 7,358,320 = 日K股数口径）。统一换算成手，否则分时量与均价线(额/(量x100))错 100 倍。 */
-        var cv = Number(pr[2]) || 0;
-        if (/^68[89]/.test(code)) cv = cv / 100;    // 科创板: 股 -> 手
-        vols.push(i === 0 ? cv : cv - running);     // 还原为每分钟成交量
-        running = cv;
-        cumVol.push(cv);
-        cumAmt.push(Number(pr[3]) || 0);             // 累计成交额(元)
-      }
-      var avg = cumVol.map(function (cv, i) {
-        return cv > 0 ? +(cumAmt[i] / (cv * 100)).toFixed(3) : prices[i];
-      });
-      var prev = null;
-      if (dj) {
-        var dnode = (dj.data && dj.data[sym]) || {};
-        var drows = dnode.qfqday || dnode.day || [];
-        if (drows.length >= 2) prev = Number(drows[drows.length - 2][2]);   // 昨收
-        else if (drows.length === 1) prev = Number(drows[0][2]);
-      }
-      return {
-        ok: true,
-        data: {
-          code: code, name: txName(code), period: 'minute', days: 1,
-          date: md.date || '', times: times, prices: prices,
-          vols: vols, avg: avg, prev_close: prev
-        }
-      };
-    });
+    ]).then(function (res) { return buildTxMinute(res[0], res[1], code); });
   }
 
   /* 东财行情直连（与主看板实时行情同源 push2.eastmoney.com，浏览器已验证可达 + CORS） */
@@ -1303,83 +1310,87 @@
     var pre = (code.charAt(0) === '6') ? '1' : '0';
     return pre + '.' + code;
   }
-  function emKlineDirect(code, period, days) {
-    var secid = emSecid(code);
-    var klt = (period === 'week') ? 102 : (period === 'month') ? 103 : 101;
-    /* kline/get 只有 push2his 域名有数据（实测 2026-09-13：push2 与 push2delay 的 kline 恒返回
-       空数组 -> 这里曾永远抛「无数据」-> 静默落到腾讯兜底，所有端都拿不到真实成交额 f57；
-       而 stock/get、trends2 在 push2 正常，所以九宫格有值、K线量额却是估算 —— 极易误判为「接口被拦」。 */
-    var url = 'https://push2his.eastmoney.com/api/qt/stock/kline/get?secid=' + secid +
-              '&fields1=f1,f2,f3&fields2=f51,f52,f53,f54,f55,f56,f57' +
-              '&klt=' + klt + '&fqt=1&end=20500101&lmt=' + days + '&_=' + Date.now();
-    return fetchTxJson(url).then(function (j) {
-      var dd = (j && j.data) || {};
-      var kl = dd.klines || [];
-      if (!kl.length) throw new Error('无数据');
-      var dates = [], ohlc = [], vols = [], amts = [];
-      for (var i = 0; i < kl.length; i++) {
-        var p = String(kl[i]).split(',');
-        dates.push(p[0]);
-        /* 东财 klines 原始序为 开,收,高,低；统一成项目契约 [开,收,低,高]（见 kline.py） */
-        ohlc.push([Number(p[1]), Number(p[2]), Number(p[4]), Number(p[3])]);
-        vols.push(Number(p[5]));
-        /* p[6] = f57 = 成交额(元)。与右上角「额」同源同量纲，逐根都拿得到（腾讯源没有这个字段）。
-           实测核实（2026-09-13，klt=103 月线）：2026-08-31 量 5613971 手 / 额 49.29 亿，
-           隐含均价 8.78 元落在 8 月区间 8.37~9.45 内；2026-09-11 同理（均价 9.76 元）。 */
-        amts.push(Number(p[6]) || 0);
-      }
-      return {
-        ok: true,
-        data: {
-          code: code, name: dd.name || code, period: period, days: days,
-          dates: dates, ohlc: ohlc, volumes: vols, amounts: amts,
+  /* 东财日K解析（被浏览器直连与同源代理两条路径共用，单一数据源） */
+  function buildEmKline(j, code, period, days) {
+    var dd = (j && j.data) || {};
+    var kl = dd.klines || [];
+    if (!kl.length) throw new Error('无数据');
+    var dates = [], ohlc = [], vols = [], amts = [];
+    for (var i = 0; i < kl.length; i++) {
+      var p = String(kl[i]).split(',');
+      dates.push(p[0]);
+      /* 东财 klines 原始序为 开,收,高,低；统一成项目契约 [开,收,低,高]（见 kline.py） */
+      ohlc.push([Number(p[1]), Number(p[2]), Number(p[4]), Number(p[3])]);
+      vols.push(Number(p[5]));
+      /* p[6] = f57 = 成交额(元)。与右上角「额」同源同量纲，逐根都拿得到（腾讯源没有这个字段）。
+         实测核实（2026-09-13，klt=103 月线）：2026-08-31 量 5613971 手 / 额 49.29 亿，
+         隐含均价 8.78 元落在 8 月区间 8.37~9.45 内；2026-09-11 同理（均价 9.76 元）。 */
+      amts.push(Number(p[6]) || 0);
+    }
+    return {
+      ok: true,
+      data: {
+        code: code, name: dd.name || code, period: period, days: days,
+        dates: dates, ohlc: ohlc, volumes: vols, amounts: amts,
         last: { close: ohlc[ohlc.length-1][1], open: ohlc[ohlc.length-1][0],
                 high: ohlc[ohlc.length-1][3], low: ohlc[ohlc.length-1][2],
                 vol: vols[ohlc.length-1] },
         prev_close: ohlc.length > 1 ? ohlc[ohlc.length-2][1] : ohlc[ohlc.length-1][0],
         daily_open: ohlc[ohlc.length-1][0], daily_high: ohlc[ohlc.length-1][3],
         daily_low: ohlc[ohlc.length-1][2], daily_vol: vols[ohlc.length-1],
-        /* 末根真实成交额：右上角「额」在异步补全到位前也能直接显示真值 */
         daily_amt: amts[amts.length-1] || 0,
         ma: { ma5: calcMA(ohlc, 5), ma10: calcMA(ohlc, 10),
               ma20: calcMA(ohlc, 20), ma30: calcMA(ohlc, 30) }
       }
-      };
-    });
+    };
   }
+  /* 浏览器直连东财（代理不可达时的兜底）。
+     kline/get 只有 push2his 域名有数据（实测 2026-09-13：push2 与 push2delay 的 kline 恒返回
+     空数组）。 */
+  function emKlineDirect(code, period, days) {
+    var secid = emSecid(code);
+    var klt = (period === 'week') ? 102 : (period === 'month') ? 103 : 101;
+    var url = 'https://push2his.eastmoney.com/api/qt/stock/kline/get?secid=' + secid +
+              '&fields1=f1,f2,f3&fields2=f51,f52,f53,f54,f55,f56,f57' +
+              '&klt=' + klt + '&fqt=1&end=20500101&lmt=' + days + '&_=' + Date.now();
+    return fetchTxJson(url).then(function (j) { return buildEmKline(j, code, period, days); });
+  }
+  /* 东财分时解析（被浏览器直连与同源代理两条路径共用，单一数据源） */
+  function buildEmMinute(j, code) {
+    var dd = (j && j.data) || {};
+    var tr = dd.trends || [];
+    if (!tr.length) throw new Error('无分时数据');
+    var prices = [], times = [], vols = [], cumAmt = [], cumVol = [], running = 0;
+    var prev = Number(dd.preClose) || null;
+    for (var i = 0; i < tr.length; i++) {
+      var p = String(tr[i]).split(',');
+      times.push(String(p[0]).slice(11));           // "2026-09-09 09:30" -> "09:30"
+      prices.push(Number(p[2]));                    // 分时走势取每分钟收盘价
+      var cv = Number(p[5]) || 0;                   // 累计成交量(手)
+      vols.push(i === 0 ? cv : cv - running);
+      running = cv;
+      cumVol.push(cv);
+      cumAmt.push(Number(p[6]) || 0);
+    }
+    var avg = cumVol.map(function (cv, i) {
+      return cv > 0 ? +(cumAmt[i] / (cv * 100)).toFixed(3) : prices[i];
+    });
+    return {
+      ok: true,
+      data: {
+        code: code, name: dd.name || code, period: 'minute', days: 1,
+        date: dd.date || '', times: times, prices: prices,
+        vols: vols, avg: avg, prev_close: prev
+      }
+    };
+  }
+  /* 浏览器直连东财分时（代理不可达时的兜底） */
   function emMinuteDirect(code) {
     var secid = emSecid(code);
     var url = 'https://push2.eastmoney.com/api/qt/stock/trends2/get?secid=' + secid +
               '&fields1=f1,f2,f3,f7&fields2=f51,f52,f53,f54,f55,f56,f57,f58' +
               '&iscr=0&ndays=1&forcect=1&_=' + Date.now();
-    return fetchTxJson(url).then(function (j) {
-      var dd = (j && j.data) || {};
-      var tr = dd.trends || [];
-      if (!tr.length) throw new Error('无分时数据');
-      var prices = [], times = [], vols = [], cumAmt = [], cumVol = [], running = 0;
-      var prev = Number(dd.preClose) || null;
-      for (var i = 0; i < tr.length; i++) {
-        var p = String(tr[i]).split(',');
-        times.push(String(p[0]).slice(11));           // "2026-09-09 09:30" -> "09:30"
-        prices.push(Number(p[2]));                    // 分时走势取每分钟收盘价
-        var cv = Number(p[5]) || 0;                   // 累计成交量(手)
-        vols.push(i === 0 ? cv : cv - running);
-        running = cv;
-        cumVol.push(cv);
-        cumAmt.push(Number(p[6]) || 0);
-      }
-      var avg = cumVol.map(function (cv, i) {
-        return cv > 0 ? +(cumAmt[i] / (cv * 100)).toFixed(3) : prices[i];
-      });
-      return {
-        ok: true,
-        data: {
-          code: code, name: dd.name || code, period: 'minute', days: 1,
-          date: dd.date || '', times: times, prices: prices,
-          vols: vols, avg: avg, prev_close: prev
-        }
-      };
-    });
+    return fetchTxJson(url).then(function (j) { return buildEmMinute(j, code); });
   }
 
   /* 东财单股详细行情（市值/流通/换手/量比/市盈TTM/成交额），用于补齐 K 线弹窗头部。
@@ -1408,6 +1419,16 @@
       };
     });
   }
+
+  /* K线/分时同源代理基地址：
+     - Cloudflare Pages 部署（*.pages.dev）：与函数同域，走 /api/kline（无跨域）。
+     - GitHub Pages 静态板（*.github.io）：无服务端函数，跨域调用已部署的 Pages 函数
+       （带 CORS），由服务端抓取东财→腾讯，绕开浏览器跨域/网络限制。 */
+  var KLINE_BASE = (function () {
+    var h = location.hostname;
+    if (h.indexOf('pages.dev') >= 0 || h.indexOf('workers.dev') >= 0) return '';
+    return 'https://uptrend-board-func.pages.dev';
+  })();
 
   function loadKline() {
     if (!state.code) return;
@@ -1458,11 +1479,30 @@
         }
       });
     }
+    /* 主路径：同源代理（服务端抓东财→腾讯，绕开浏览器跨域/网络限制）。
+       兜底：代理不可达时回退浏览器直连东财→腾讯（保持原有顺序）。 */
+    function loadViaProxy() {
+      var kind = isMin ? 'minute' : 'kline';
+      var pUrl = KLINE_BASE + '/api/kline?kind=' + kind +
+                 '&code=' + encodeURIComponent(state.code) +
+                 '&period=' + period + '&days=' + days;
+      setLoading('行情加载中…（代理）');
+      return fetchTxJson(pUrl).then(function (j) {
+        if (!j || !j.ok) throw new Error((j && j.error) || 'proxy');
+        var r = (j.source === 'tx')
+          ? (isMin ? buildTxMinute(j.raw, null, state.code) : buildTxKline(j.raw, state.code, period, days))
+          : (isMin ? buildEmMinute(j.raw, state.code)      : buildEmKline(j.raw, state.code, period, days));
+        if (!r || !r.ok) throw new Error('解析失败');
+        return r;
+      });
+    }
     var sources = isMin
       ? [function(){ return emMinuteDirect(state.code); }, function(){ return txMinuteDirect(state.code); }]
       : [function(){ return emKlineDirect(state.code, period, days); }, function(){ return txKlineDirect(state.code, period, days); }];
     sources[0]._name = '东财'; sources[1]._name = '腾讯';
-    tryLoad(sources);
+    loadViaProxy().then(handle).catch(function () {
+      tryLoad(sources);   // 代理不可达 → 浏览器直连兜底
+    });
   }
 
   /* ============ 日 K（含成交量 + 成交额） ============ */
