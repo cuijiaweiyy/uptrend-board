@@ -1697,20 +1697,20 @@
       animation: false,
       backgroundColor: 'transparent',
       textStyle: { color: '#d9dee8', fontSize: 11 },
+      /* 随鼠标移动的浮动气泡已移除：tooltip 仍保留 trigger:'axis' 以驱动十字光标与
+         左上角信息卡(#kClickInfo)随 hover 更新，但弹出框设为透明+空内容，视觉上不可见。 */
       tooltip: {
-        trigger: 'axis', axisPointer: { type: 'cross', link: [{xAxisIndex: 'all'}] },
-        backgroundColor: 'rgba(16,16,16,.96)', borderColor: '#2a3247',
-        textStyle: { color: '#e6e9f0', fontSize: 11 },
-        formatter: function(params){
-          var i = params[0].dataIndex;
-          var o = d.ohlc[i];
-          return '<b>' + dates[i] + '</b><br/>' +
-                 '开:' + fmt(o[0]) + ' 收:' + fmt(o[1]) + '<br/>' +
-                 '低:' + fmt(o[2]) + ' 高:' + fmt(o[3]) + '<br/>' +
-                 '量:' + fmtVol(vol[i]) + '手 额:' + fmtAmt(amt[i]);
-        }
+        trigger: 'axis',
+        show: true,
+        backgroundColor: 'transparent',
+        borderColor: 'transparent',
+        borderWidth: 0,
+        padding: 0,
+        textStyle: { color: 'transparent', fontSize: 11 },
+        extraCssText: 'opacity:0 !important; box-shadow:none !important; border:none !important; background:transparent !important;',
+        formatter: function(){ return ''; }
       },
-      axisPointer: { link: [{xAxisIndex: 'all'}] },
+      axisPointer: { type: 'cross', link: [{xAxisIndex: 'all'}], label: { show: false } },
       grid: [
         { left: 4, right: 6, top: 2,  height: '46%' },     // 主图 2%→48%（更贴近同花顺主图占比）
         { left: 4, right: 6, top: '51%', height: '16%' },  // 成交量 51%→67%
@@ -1993,19 +1993,19 @@
       animation: false,
       backgroundColor: 'transparent',
       textStyle: { color: '#d9dee8', fontSize: 11 },
+      /* 分时图同样去掉随鼠标移动的浮动气泡；十字光标 + 信息卡逻辑与日K一致 */
       tooltip: {
-        trigger: 'axis', axisPointer: { type: 'cross', link: [{xAxisIndex: 'all'}] },
-        backgroundColor: 'rgba(16,16,16,.96)', borderColor: '#2a3247',
-        textStyle: { color: '#e6e9f0', fontSize: 11 },
-        formatter: function(params){
-          var i = params[0].dataIndex;
-          var p = prices[i], pct = (p - prev) / prev * 100;
-          return '<b>' + (d.date || '') + ' ' + d.times[i] + '</b><br/>' +
-                 '价:' + fmt(p) + ' (' + sign(pct.toFixed(2)) + '%)<br/>' +
-                 '均:' + fmt(avg[i]) + '<br/>量:' + fmtVol(vols[i]) + '手';
-        }
+        trigger: 'axis',
+        show: true,
+        backgroundColor: 'transparent',
+        borderColor: 'transparent',
+        borderWidth: 0,
+        padding: 0,
+        textStyle: { color: 'transparent', fontSize: 11 },
+        extraCssText: 'opacity:0 !important; box-shadow:none !important; border:none !important; background:transparent !important;',
+        formatter: function(){ return ''; }
       },
-      axisPointer: { link: [{xAxisIndex: 'all'}] },
+      axisPointer: { type: 'cross', link: [{xAxisIndex: 'all'}], label: { show: false } },
       grid: [
         { left: 4, right: 6, top: 4,  height: '58%' },
         { left: 4, right: 6, top: '71%', height: '25%' }
