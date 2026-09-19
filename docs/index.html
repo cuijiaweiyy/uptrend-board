@@ -534,14 +534,14 @@
   cursor: pointer;
 }
 
-/* ====== 点击 K 线 · 左上角信息卡（日期 + 当日涨跌 + 至今涨跌） ====== */
+/* ====== 点击 K 线 · 左上角信息卡（hover 当天股价 + 当日涨跌 / 至今涨幅 + 周期） ====== */
 .k-click-info {
   position: absolute; top: 6px; left: 8px; z-index: 3;
   background: rgba(20,25,40,.92);
   border: 1px solid #3a4565;
   border-radius: 6px;
   padding: 6px 10px;
-  font-size: 11px; line-height: 1.5;
+  font-size: 11px; line-height: 1.45;
   pointer-events: none;
   display: none;
   white-space: nowrap;
@@ -549,19 +549,32 @@
   box-shadow: 0 4px 14px rgba(0,0,0,.4);
   min-width: 200px;
 }
-.k-click-info .d { color: #fff; font-weight: 700; font-size: 12.5px; margin-bottom: 3px; display: block; }
-.k-click-info .since { color: #c0c5d1; font-size: 10.5px; margin-top: 1px; }
-.k-click-info .since .v { font-size: 13.5px; font-weight: 800; margin-left: 4px; }
-.k-click-info .since .v.up   { color: #ff6a5a; }
-.k-click-info .since .v.down { color: #14b87d; }
-.k-click-info .since .per { color: #8b93a7; font-size: 10.5px; font-weight: 600; margin-left: 6px; }
-.k-click-info .day { color: #c0c5d1; font-size: 10.5px; }
-.k-click-info .day .v { font-weight: 800; font-size: 15px; margin-left: 5px; }
-.k-click-info .sep { color: #4b5563; margin: 0 4px; }
-.k-click-info .lbl { color: #8b93a7; font-size: 9.5px; margin-right: 2px; }
-.k-click-info .v.up { color: #ff6a5a; font-weight: 600; }
-.k-click-info .v.down { color: #14b87d; font-weight: 600; }
-.k-click-info .v.flat { color: #c0c5d1; font-weight: 600; }
+.k-click-info .price-row { display: flex; align-items: baseline; gap: 8px; margin-bottom: 1px; }
+.k-click-info .price {
+  font-size: 22px; font-weight: 800; letter-spacing: -0.5px;
+}
+.k-click-info .price.up   { color: #ff6a5a; }
+.k-click-info .price.down { color: #14b87d; }
+.k-click-info .price.flat { color: #c0c5d1; }
+.k-click-info .chg {
+  font-size: 11.5px; font-weight: 700;
+}
+.k-click-info .chg.up   { color: #ff6a5a; }
+.k-click-info .chg.down { color: #14b87d; }
+.k-click-info .chg.flat { color: #c0c5d1; }
+.k-click-info .date-since-row {
+  color: #c0c5d1; font-size: 10.5px; margin-top: 3px;
+  display: flex; align-items: baseline; gap: 6px;
+}
+.k-click-info .date-since-row .d {
+  color: #fff; font-weight: 700; font-size: 11.5px;
+}
+.k-click-info .date-since-row .since-lbl { color: #8b93a7; }
+.k-click-info .date-since-row .since-v { font-weight: 800; font-size: 12.5px; margin-left: 2px; }
+.k-click-info .date-since-row .since-v.up   { color: #ff6a5a; }
+.k-click-info .date-since-row .since-v.down { color: #14b87d; }
+.k-click-info .date-since-row .since-v.flat { color: #c0c5d1; }
+.k-click-info .date-since-row .per { color: #8b93a7; font-weight: 600; margin-left: 2px; }
 .k-click-info .hint { color: #6b7488; font-size: 9px; margin-top: 3px; display:block; }
 
 /* ====== 副图小标题（成交量 / 成交额） ====== */
@@ -713,9 +726,13 @@
     <div class="k-subhdr" id="kVolHdr" style="display:none"></div>
     <div class="k-subhdr" id="kAmtHdr" style="display:none"></div>
     <div class="k-click-info" id="kClickInfo">
-      <span class="d" id="kClickDate">—</span>
-      <div class="day"><span class="lbl">当日</span><span class="v" id="kClickDay">—</span></div>
-      <div class="since"><span class="lbl">至今</span><span class="v" id="kClickSince">—</span><span class="per" id="kClickPeriod"></span></div>
+      <div class="price-row"><span class="price" id="kClickPrice">—</span><span class="chg" id="kClickChg">—</span></div>
+      <div class="date-since-row">
+        <span class="d" id="kClickDate">—</span>
+        <span class="since-lbl">至今涨幅</span>
+        <span class="since-v" id="kClickSince">—</span>
+        <span class="per" id="kClickPeriod"></span>
+      </div>
       <span class="hint">光标移到 K 线上查看</span>
     </div>
     <div class="k-loading" id="klineLoading">加载中…</div>
@@ -1099,10 +1116,13 @@
     el.className = 'k-click-info';
     el.id = 'kClickInfo';
     el.innerHTML =
-      '<span class="d" id="kClickDate">—</span>' +
-      '<div class="day"><span class="lbl">当日</span><span class="v" id="kClickDay">—</span></div>' +
-      '<div class="since"><span class="lbl">至今</span><span class="v" id="kClickSince">—</span>' +
-      '<span class="per" id="kClickPeriod"></span></div>' +
+      '<div class="price-row"><span class="price" id="kClickPrice">—</span><span class="chg" id="kClickChg">—</span></div>' +
+      '<div class="date-since-row">' +
+        '<span class="d" id="kClickDate">—</span>' +
+        '<span class="since-lbl">至今涨幅</span>' +
+        '<span class="since-v" id="kClickSince">—</span>' +
+        '<span class="per" id="kClickPeriod"></span>' +
+      '</div>' +
       '<span class="hint">光标移到 K 线上查看</span>';
     host.appendChild(el);
     return el;
@@ -1132,11 +1152,13 @@
     /* 0 不带正号（同花顺口径） */
     function sv(v){ return (v > 0 ? '+' : '') + v.toFixed(2); }
     function pv(v){ return (v > 0 ? '+' : '') + v.toFixed(2) + '%'; }
+    var priceEl = $('kClickPrice');
+    if (priceEl) { priceEl.className = 'price ' + cls(dayChg); priceEl.textContent = close.toFixed(2); }
+    var chgEl = $('kClickChg');
+    if (chgEl) { chgEl.className = 'chg ' + cls(dayChg); chgEl.textContent = sv(dayChg) + '  ' + pv(dayPct); }
     $('kClickDate').textContent = dates[i] || ('idx ' + i);
-    $('kClickDay').className   = 'v ' + cls(dayChg);
-    $('kClickDay').textContent = pv(dayPct) + ' (' + sv(dayChg) + ')';
-    $('kClickSince').className = 'v ' + cls(sinceChg);
-    $('kClickSince').textContent = pv(sincePct) + ' (' + sv(sinceChg) + ')';
+    var sinceEl = $('kClickSince');
+    if (sinceEl) { sinceEl.className = 'since-v ' + cls(sinceChg); sinceEl.textContent = pv(sincePct); }
     var perEl = $('kClickPeriod');
     if (perEl) perEl.textContent = period > 0 ? (period + ' 周期') : '';
     /* 必须显式设为 block：CSS 里 .k-click-info 是 display:none，
@@ -1532,9 +1554,13 @@
                    '<div class="k-subhdr" id="kVolHdr" style="display:none"></div>' +
                    '<div class="k-subhdr" id="kAmtHdr" style="display:none"></div>' +
                    '<div class="k-click-info" id="kClickInfo">' +
-                     '<span class="d" id="kClickDate">—</span>' +
-                     '<div class="day"><span class="lbl">当日</span><span class="v" id="kClickDay">—</span></div>' +
-                     '<div class="since"><span class="lbl">至今</span><span class="v" id="kClickSince">—</span><span class="per" id="kClickPeriod"></span></div>' +
+                     '<div class="price-row"><span class="price" id="kClickPrice">—</span><span class="chg" id="kClickChg">—</span></div>' +
+                     '<div class="date-since-row">' +
+                       '<span class="d" id="kClickDate">—</span>' +
+                       '<span class="since-lbl">至今涨幅</span>' +
+                       '<span class="since-v" id="kClickSince">—</span>' +
+                       '<span class="per" id="kClickPeriod"></span>' +
+                     '</div>' +
                      '<span class="hint">光标移到 K 线上查看</span>' +
                    '</div>' +
                    '<div class="k-chart" id="kChartInner"></div>';
