@@ -1187,6 +1187,9 @@
     if (hintEl) hintEl.style.display = 'none';   /* 已经在显示数据了，别再提示「光标移到 K 线上查看」 */
     el.style.display = 'block';
     _lastInfoIdx = i;
+    /* 右上角网格随 hover 当日联动：写回 gHoverIdx 并就地重渲染（市值等保最新快照）。 */
+    gHoverIdx = i;
+    if (dLastData) renderGrid(dLastData, i);
   }
   function hideClickInfo() {
     var el = $('kClickInfo');
