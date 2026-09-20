@@ -892,6 +892,50 @@
   window.refreshKline = function() { loadKline(); };
 
   /* ============ 头部 / 网格渲染 ============ */
+  /* 右上角 3×3 网格（高/市值/量比/低/流通/换/开/市盈TTM/额）。
+     idx<0 → 当日（最新）汇总；idx>=0 → hover 到某根 K 线，开/高/低/额改用该日值，
+     市值/流通/量比/市盈TTM/换手为最新快照（数据源无逐日历史值，仅东财单股详情给当前值）。 */
+  function renderGrid(d, idx) {
+    if (!d) return;
+    var last = d.last || {};
+    var prevClose = d.prev_close || last.close;
+    var open, high, low, vol, amt, dayUp, openUp;
+    if (idx >= 0 && d.ohlc && d.ohlc[idx] && d.ohlc[idx][0]) {
+      var o = d.ohlc[idx];
+      open = o[0]; high = o[3]; low = o[2];
+      vol = (d.volumes && d.volumes[idx] != null) ? d.volumes[idx] : (d.daily_vol || last.vol);
+      amt = (d.amounts && d.amounts[idx] != null) ? d.amounts[idx] : (d.daily_amt || 0);
+      var ph = (idx > 0 && d.ohlc[idx - 1] && d.ohlc[idx - 1][1]) ? d.ohlc[idx - 1][1] : open;
+      dayUp = o[1] >= ph;
+      openUp = o[1] >= o[0];
+    } else {
+      high = d.daily_high || last.high;
+      low  = d.daily_low  || last.low;
+      open = d.daily_open || last.open;
+      vol  = d.daily_vol  || last.vol;
+      amt  = d.daily_amt  || (vol ? (vol * 100 * ((open + high + low + (last.close || open)) / 4)) : 0);
+      dayUp = last.close >= prevClose;
+      openUp = last.close >= open;
+    }
+    var lbUp = d.lb && d.lb > 1;
+    function cell(label, value, color) {
+      return '<div class="g"><span class="l">' + label + '</span>' +
+             '<span class="v' + (color ? ' ' + color : '') + '">' + value + '</span></div>';
+    }
+    var html = '';
+    html += cell('高',   fmt(high),                                   dayUp  ? 'up'   : 'down');
+    html += cell('市值', fmtYi(d.mv));
+    html += cell('量比', fmtNum(d.lb, 2),                         lbUp   ? 'up'   : '');
+    html += cell('低',   fmt(low),                                    dayUp  ? 'down' : 'up');
+    html += cell('流通', fmtYi(d.cmv));
+    html += cell('换',   fmtNum(d.hs, 2, '%'));
+    html += cell('开',   fmt(open),                                   openUp ? 'up'   : 'down');
+    html += cell('市盈<sup style="font-size:8px">TTM</sup>', fmtNum(d.pe_ttm, 2));
+    html += cell('额',   fmtAmt(amt));
+    var gridEl = $('kGrid');
+    if (gridEl) gridEl.innerHTML = html;
+  }
+
   function renderHeader(d) {
     $('kName').innerHTML = (d.name || '—') + ' <span class="check">✓</span>';
     $('kCode').textContent = d.code;
@@ -925,35 +969,9 @@
     $('kChg').innerHTML = '<span class="' + cls + '">' + sign(chg.toFixed(2)) +
       '</span> <span class="' + cls + '">' + sign(pct.toFixed(2)) + '%</span>';
 
-    var high = d.daily_high || last.high;
-    var low  = d.daily_low  || last.low;
-    var open = d.daily_open || last.open;
-    var vol  = d.daily_vol  || last.vol;
-    /* 成交量单位是「手」：元 = 手 × 100 股 × 均价（原式少乘 100，误差 1e4 倍） */
-    var amt  = d.daily_amt  || (vol ? (vol * 100 * ((open + high + low + last.close) / 4)) : 0);
-
-    /* 颜色规则（对齐同花顺）：
-       高 = 当日方向（红涨/绿跌），低 = 反向，
-       开 = close vs open（close>open 红），量比 >1 红 */
-    var dayUp = last.close >= prevClose;
-    var openUp = last.close >= open;
-    var lbUp = d.lb && d.lb > 1;
-    function cell(label, value, color) {
-      return '<div class="g"><span class="l">' + label + '</span>' +
-             '<span class="v' + (color ? ' ' + color : '') + '">' + value + '</span></div>';
-    }
-    /* 3 列 × 3 行：列1 高/低/开 | 列2 市值/流通/市盈TTM | 列3 量比/换/额 */
-    var html = '';
-    html += cell('高',   fmt(high),                                   dayUp  ? 'up'   : 'down');
-    html += cell('市值', fmtYi(d.mv));
-    html += cell('量比', fmtNum(d.lb, 2),                         lbUp   ? 'up'   : '');
-    html += cell('低',   fmt(low),                                    dayUp  ? 'down' : 'up');
-    html += cell('流通', fmtYi(d.cmv));
-    html += cell('换',   fmtNum(d.hs, 2, '%'));
-    html += cell('开',   fmt(open),                                   openUp ? 'up'   : 'down');
-    html += cell('市盈<sup style="font-size:8px">TTM</sup>', fmtNum(d.pe_ttm, 2));
-    html += cell('额',   fmtAmt(amt));
-    $('kGrid').innerHTML = html;
+    /* 右上角网格（高/市值/量比/低/流通/换/开/市盈TTM/额）。
+       idx<0 显示当日汇总，>=0 显示光标当日的高/低/开/额；市值等保持最新快照。 */
+    renderGrid(d, gHoverIdx);
 
     var pxEl = $('kPostPx');
     if (pxEl) { pxEl.textContent = fmt(last.close); pxEl.className = 'px ' + cls; }
@@ -1172,6 +1190,8 @@
     var el = $('kClickInfo');
     if (el) el.style.display = 'none';
     _lastInfoIdx = -1;
+    gHoverIdx = -1;
+    if (dLastData) renderGrid(dLastData, -1);
   }
 
   /* ============ 加载入口 ============ */
@@ -1424,23 +1444,18 @@
      f164=市盈TTM f167=市净率 f48=成交额 f57=代码；而 f2/f3/f6/f8/f9/f10/f20/f21/f12
      属列表接口，本接口一律不返回 —— 曾因此导致整块补全从未生效。
      另：必须带 fltt=2，否则所有数值均放大 100 倍（f43 返回 926 而非 9.26）。 */
+  /* 单股实时快照（市值/流通/换手/量比/市盈TTM/成交额）：改走同源代理 /api/quote，
+     由 CF 边缘服务端抓东财 stock/get 并带 CORS 回传。原浏览器直连东财 push2 在部分网络下
+     被 CORS/GFW 拦截，导致「市值/流通」网格空白（与 K 线同源代理同一根因）。 */
   function emQuoteDirect(code) {
-    var secid = emSecid(code);
-    var url = 'https://push2.eastmoney.com/api/qt/stock/get?secid=' + secid +
-              '&fields=f43,f47,f48,f50,f57,f58,f116,f117,f164,f167,f168,f170&invt=2&fltt=2';
-    return fetchTxJson(url).then(function(j){
-      var d = (j && j.data) || {};
-      if (!d || !d.f57) return null;          // 代码字段是 f57（不是 f12）
+    var url = KLINE_BASE + '/api/quote?code=' + code;
+    return fetchTxJson(url).then(function (j) {
+      if (!j || !j.ok || !j.data) return null;
+      var d = j.data;
       function num(v){ return (typeof v === 'number' && isFinite(v)) ? v : null; }
-      var mv = num(d.f116), cmv = num(d.f117);
       return {
-        mv: mv === null ? null : mv / 1e8,      // 总市值(亿)
-        cmv: cmv === null ? null : cmv / 1e8,   // 流通市值(亿)
-        hs: num(d.f168),                        // 换手率%
-        lb: num(d.f50),                         // 量比
-        pe_ttm: num(d.f164),                    // 市盈率TTM
-        pb: num(d.f167),                        // 市净率
-        daily_amt: num(d.f48)                   // 成交额(元)
+        mv: num(d.mv), cmv: num(d.cmv), hs: num(d.hs), lb: num(d.lb),
+        pe_ttm: num(d.pe_ttm), pb: num(d.pb), daily_amt: num(d.daily_amt)
       };
     });
   }
@@ -1480,6 +1495,7 @@
         // 异步补全头部市值/流通/换手/量比/市盈TTM/成交额
         emQuoteDirect(state.code).then(function(q){
           if (!q) return;
+          Object.assign(dLastData, q);   // 写回，让 hover 重渲染也能拿到市值等快照
           renderHeader(Object.assign({}, curD, q));
         }).catch(function(){});
       }
@@ -1535,6 +1551,7 @@
     dLastDates = d.dates || [];
     dLastOhlc  = d.ohlc  || [];
     dLastLen   = dLastOhlc.length;
+    dLastData  = d;
     hideClickInfo();
     clearLoading();
     /* 重建容器前必须 dispose 旧实例：否则 zrender 的全局渲染循环会随每次重绘不断累积 */
