@@ -1121,6 +1121,8 @@
   /* ============ 光标悬停 K 线 · 左上角信息卡（当日涨跌幅 / 至今涨幅 + 周期） ============ */
   /* 口径（对齐同花顺）：当日 = 相对前收；至今 = 相对「光标当日的前收」，周期含光标当日 */
   var dLastDates = [], dLastOhlc = [], dLastLen = 0;
+  var dLastData = null;        /* 完整 K 线数据，供 hover 重渲染右上角网格取市值等最新快照 */
+  var gHoverIdx = -1;          /* 当前 hover 的 K 线索引；-1 = 当日（最新） */
   var _lastInfoIdx = -1;   /* 同一根 K 线不重复刷 DOM（mousemove 高频触发） */
   /* 保险：信息卡不存在就现建一个。
      它作为 #klineChart 的子节点，而 renderKline 会整体重建该容器的 innerHTML，
