@@ -3001,45 +3001,68 @@ window.addEventListener('resize', function () {
     function p(n) { return (n < 10 ? '0' : '') + n; }
     tag.textContent = '行情实时 ' + p(t.getHours()) + ':' + p(t.getMinutes()) + ':' + p(t.getSeconds());
   }
-  function refreshQuotes() {
+  function tradingNow() {
+    var d = new Date();
+    var day = d.getDay();
+    if (day === 0 || day === 6) return false;
+    var mins = d.getHours() * 60 + d.getMinutes();
+    return mins >= 9 * 60 && mins <= 15 * 60 + 5;
+  }
+  var PROXY_BASE = (location.hostname.indexOf('pages.dev') >= 0) ? '' : 'https://uptrend-board-func.pages.dev';
+  var _useProxy = null; // null=未探测 false=直连可用 true=走代理兜底
+  function fetchBatch(batch) {
+    var secids = [];
+    for (var k = 0; k < batch.length; k++) {
+      var s = toSecid(batch[k]);
+      if (s) secids.push(s);
+    }
+    if (!secids.length) return Promise.resolve();
+    var q = 'secids=' + encodeURIComponent(secids.join(',')) + '&fields=f2,f3,f6,f12';
+    function tryDirect() {
+      var ctrl = new AbortController();
+      var t = setTimeout(function () { ctrl.abort(); }, 4000);
+      return fetch('https://push2.eastmoney.com/api/qt/ulist.np/get?fltt=2&' + q, { cache: 'no-store', signal: ctrl.signal })
+        .then(function (r) { clearTimeout(t); if (!r.ok) throw new Error('http' + r.status); return r.json(); })
+        .then(function (j) { if (!(j && j.data && j.data.diff)) throw new Error('empty'); return j; });
+    }
+    function tryProxy() {
+      return fetch(PROXY_BASE + '/api/quotes?' + q, { cache: 'no-store' })
+        .then(function (r) { if (!r.ok) throw new Error('http' + r.status); return r.json(); });
+    }
+    var p;
+    if (_useProxy === true) p = tryProxy();
+    else if (_useProxy === false) p = tryDirect();
+    else p = tryDirect().catch(function () { _useProxy = true; return tryProxy(); });
+    return p.then(function (j) {
+      var diff = (j && j.data && j.data.diff) || [];
+      var got = 0;
+      for (var i = 0; i < diff.length; i++) {
+        var d = diff[i];
+        if (!d) continue;
+        applyQuote(d.f12, d.f2, d.f3, d.f6);
+        got++;
+      }
+      if (got) tick();
+    }).catch(function () {});
+  }
+  function refreshQuotes(force) {
+    if (!force && !tradingNow()) return; // 非交易时段不轮询，省代理额度；force=手动/首屏强制
     var cards = document.querySelectorAll('.diffcard[data-code]');
     var codes = [];
     for (var i = 0; i < cards.length; i++) {
-      var c = cards[i].getAttribute('data-code');
-      if (c && codes.indexOf(c) < 0) codes.push(c);
+      var cc = cards[i].getAttribute('data-code');
+      if (cc && codes.indexOf(cc) < 0) codes.push(cc);
     }
     if (!codes.length) return;
     var BATCH = 80;
     for (var b = 0; b < codes.length; b += BATCH) {
-      (function (batch) {
-        var secids = [];
-        for (var k = 0; k < batch.length; k++) {
-          var s = toSecid(batch[k]);
-          if (s) secids.push(s);
-        }
-        if (!secids.length) return;
-        var url = 'https://push2.eastmoney.com/api/qt/ulist.np/get?fltt=2&secids=' +
-                  secids.join(',') + '&fields=f2,f3,f6,f12';
-        fetch(url, { cache: 'no-store' })
-          .then(function (r) { return r.json(); })
-          .then(function (j) {
-            var diff = (j && j.data && j.data.diff) || [];
-            var got = 0;
-            for (var i = 0; i < diff.length; i++) {
-              var d = diff[i];
-              if (!d) continue;
-              applyQuote(d.f12, d.f2, d.f3, d.f6);
-              got++;
-            }
-            if (got) tick();
-          })
-          .catch(function () {});
-      })(codes.slice(b, b + BATCH));
+      fetchBatch(codes.slice(b, b + BATCH));
     }
   }
   window.refreshQuotes = refreshQuotes;
-  setTimeout(refreshQuotes, 400);
-  setInterval(refreshQuotes, 60000);
+  setTimeout(function () { refreshQuotes(true); }, 400); // 首屏强制刷一次（盘后也显示收盘价）
+  setInterval(refreshQuotes, 15000);
+
 
   /* 新渲染出的卡片（切tab / 展开板块 / 展开全部）立即补刷实时价 */
   var _rqTimer = null;
@@ -3073,7 +3096,7 @@ window.addEventListener('resize', function () {
   if (_lt) {
     _lt.style.cursor = 'pointer';
     _lt.title = '点击立即刷新行情';
-    _lt.addEventListener('click', function () { refreshQuotes(); });
+    _lt.addEventListener('click', function () { refreshQuotes(true); });
   }
 })();
 </script>
