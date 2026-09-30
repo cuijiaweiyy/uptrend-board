@@ -508,5 +508,6 @@
   "concept||重组蛋白": 64,
   "industry_l2||医疗服务": 56,
   "industry_l2||风电设备": 32,
-  "concept||细胞免疫治疗": 66
+  "concept||细胞免疫治疗": 66,
+  "industry_l3||医疗研发外包": 30
 }
