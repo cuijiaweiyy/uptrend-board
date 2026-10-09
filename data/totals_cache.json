@@ -510,5 +510,9 @@
   "industry_l2||风电设备": 32,
   "concept||细胞免疫治疗": 66,
   "industry_l3||医疗研发外包": 30,
-  "concept||钠离子电池": 144
+  "concept||钠离子电池": 144,
+  "industry_l3||疫苗": 12,
+  "industry_l3||中药Ⅲ": 68,
+  "concept||生物疫苗": 61,
+  "concept||肝炎概念": 140
 }
