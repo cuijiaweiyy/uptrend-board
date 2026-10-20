@@ -524,5 +524,7 @@
   "industry_l2||油气开采及服务": 19,
   "concept||电子竞技": 37,
   "industry_l3||水电": 11,
-  "industry_l3||火电": 31
+  "industry_l3||火电": 31,
+  "industry_l3||预加工食品": 10,
+  "concept||抽水蓄能": 81
 }
