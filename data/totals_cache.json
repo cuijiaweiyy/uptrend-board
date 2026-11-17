@@ -548,5 +548,8 @@
   "concept||MCU芯片": 96,
   "industry_l3||乳品": 20,
   "concept||广东自贸区": 29,
-  "concept||基因测序": 70
+  "concept||基因测序": 70,
+  "industry_l3||品牌消费电子": 11,
+  "industry_l3||生猪养殖": 32,
+  "concept||禽流感": 23
 }
