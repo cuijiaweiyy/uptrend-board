@@ -551,5 +551,8 @@
   "concept||基因测序": 70,
   "industry_l3||品牌消费电子": 11,
   "industry_l3||生猪养殖": 32,
-  "concept||禽流感": 23
+  "concept||禽流感": 23,
+  "industry_l2||机场航运": 13,
+  "industry_l3||航空运输": 8,
+  "concept||小米汽车": 125
 }
